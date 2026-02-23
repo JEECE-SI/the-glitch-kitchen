@@ -1,0 +1,35 @@
+
+> the-glitch-kitchen@0.1.0 build
+> next build
+
+  ▲ Next.js 14.2.35
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+
+Failed to compile.
+
+./src/app/gm/page.tsx
+11:13  Error: 'game' is assigned a value but never used.  @typescript-eslint/no-unused-vars
+11:19  Error: 'updateGameState' is assigned a value but never used.  @typescript-eslint/no-unused-vars
+
+./src/app/player/[brigade_id]/page.tsx
+5:16  Error: 'FileText' is defined but never used.  @typescript-eslint/no-unused-vars
+5:26  Error: 'Database' is defined but never used.  @typescript-eslint/no-unused-vars
+14:12  Error: 'activeTab' is assigned a value but never used.  @typescript-eslint/no-unused-vars
+
+./src/hooks/use-toast.ts
+21:7  Error: 'actionTypes' is assigned a value but only used as a type.  @typescript-eslint/no-unused-vars
+
+./src/store/useGameStore.ts
+2:16  Error: 'GamePhase' is defined but never used.  @typescript-eslint/no-unused-vars
+2:27  Error: 'GameStatus' is defined but never used.  @typescript-eslint/no-unused-vars
+
+./src/types/game.ts
+10:28  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+46:28  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+68:26  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+73:27  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+
+info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/basic-features/eslint#disabling-rules
