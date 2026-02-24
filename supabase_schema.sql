@@ -19,8 +19,16 @@ CREATE TABLE IF NOT EXISTS public.brigades (
     code VARCHAR(10) UNIQUE NOT NULL, -- Le code de connexion à 4 ou 6 caractères
     name VARCHAR(255), -- Optionnel le nom de la brigade
     prestige_points INTEGER DEFAULT 100,
-    role_capability VARCHAR(255), -- Le rôle / pouvoir affecté
-    role_used BOOLEAN DEFAULT FALSE, -- Si le pouvoir a été utilisé
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+-- 2.5 Table des Joueurs (Players)
+CREATE TABLE IF NOT EXISTS public.players (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    brigade_id UUID REFERENCES public.brigades(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    role VARCHAR(255), -- Le rôle attribué (ex: 'Chef de Brigade', 'L'Économe'...)
+    role_used BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );
 
@@ -30,6 +38,9 @@ CREATE TABLE IF NOT EXISTS public.recipe_notes (
     brigade_id UUID REFERENCES public.brigades(id) ON DELETE CASCADE,
     step_index INTEGER NOT NULL CHECK (step_index >= 1 AND step_index <= 10),
     fragments VARCHAR(255) DEFAULT '',
+    ingredient VARCHAR(255) DEFAULT '',
+    technique VARCHAR(255) DEFAULT '',
+    tool VARCHAR(255) DEFAULT '',
     notes TEXT DEFAULT '',
     UNIQUE(brigade_id, step_index)
 );
@@ -49,6 +60,7 @@ CREATE TABLE IF NOT EXISTS public.inventory (
 -- Activation du Row Level Security
 ALTER TABLE public.games ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.brigades ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.players ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.recipe_notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory ENABLE ROW LEVEL SECURITY;
 
@@ -56,6 +68,7 @@ ALTER TABLE public.inventory ENABLE ROW LEVEL SECURITY;
 -- mais pour une partie locale/entre amis les accès ouverts suffisent souvent)
 CREATE POLICY "Allow public read/write access" ON public.games FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read/write access" ON public.brigades FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public read/write access" ON public.players FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read/write access" ON public.recipe_notes FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read/write access" ON public.inventory FOR ALL USING (true) WITH CHECK (true);
 
@@ -71,8 +84,8 @@ RETURNS TRIGGER AS $$
 BEGIN
   -- Création des 10 étapes de recette vides
   FOR i IN 1..10 LOOP
-    INSERT INTO public.recipe_notes (brigade_id, step_index, fragments, notes)
-    VALUES (NEW.id, i, '', '');
+    INSERT INTO public.recipe_notes (brigade_id, step_index, fragments, ingredient, technique, tool, notes)
+    VALUES (NEW.id, i, '', '', '', '', '');
   END LOOP;
 
   -- Création des 15 slots d'inventaire vides
@@ -105,5 +118,6 @@ END $$;
 
 ALTER PUBLICATION supabase_realtime ADD TABLE public.games;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.brigades;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.players;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.recipe_notes;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.inventory;

@@ -18,6 +18,7 @@ export default function AdminDashboard() {
 
     const [games, setGames] = useState<any[]>([]);
     const [brigades, setBrigades] = useState<any[]>([]);
+    const [players, setPlayers] = useState<any[]>([]);
 
     const [isGameDialogOpen, setIsGameDialogOpen] = useState(false);
     const [newGameName, setNewGameName] = useState("");
@@ -32,6 +33,7 @@ export default function AdminDashboard() {
     useEffect(() => {
         fetchGames();
         fetchBrigades();
+        fetchPlayers();
 
         // Optional realtime updates
         const gamesSubscription = supabase
@@ -52,6 +54,11 @@ export default function AdminDashboard() {
     const fetchBrigades = async () => {
         const { data } = await supabase.from('brigades').select('*').order('created_at', { ascending: false });
         if (data) setBrigades(data);
+    };
+
+    const fetchPlayers = async () => {
+        const { data } = await supabase.from('players').select('*').order('created_at', { ascending: false });
+        if (data) setPlayers(data);
     };
 
     const generateRandomCode = () => {
@@ -142,6 +149,69 @@ export default function AdminDashboard() {
         }
     };
 
+    const ROLES = [
+        "Le Chef de Brigade (Président)",
+        "L'Économe (Trésorier)",
+        "Le Garde-Manger (Secrétaire Général)",
+        "Le Sourcier (Responsable Commercial)",
+        "Le Sous-Chef (Chef de Projet)",
+        "L'Auditeur (Responsable Qualité)",
+        "Le Dressage (Responsable Communication)",
+        "L'Éco-Sourcier (Responsable RSE)",
+        "Le Maître d'Hôtel (Développeur Commercial)",
+        "Le Hacker Chef (DSI)"
+    ];
+
+    const [isPlayerImportOpen, setIsPlayerImportOpen] = useState(false);
+    const [playersListText, setPlayersListText] = useState("");
+    const [importGameId, setImportGameId] = useState("");
+    const [isImporting, setIsImporting] = useState(false);
+
+    const importAndDistributePlayers = async () => {
+        if (!playersListText || !importGameId) return;
+        setIsImporting(true);
+        try {
+            // Parse players names
+            const names = playersListText.split('\n').map(n => n.trim()).filter(n => n.length > 0);
+            if (names.length === 0) throw new Error("No players found in text.");
+
+            // Get game brigades
+            const gameBrigades = brigades.filter(b => b.game_id === importGameId);
+            if (gameBrigades.length === 0) throw new Error("This game has no brigades.");
+
+            const playersToInsert: any[] = [];
+
+            // Randomize names array
+            const shuffledNames = [...names].sort(() => 0.5 - Math.random());
+
+            // Distribute and assign roles
+            shuffledNames.forEach((name, i) => {
+                const brigadeIndex = i % gameBrigades.length;
+                const roleIndex = Math.floor(i / gameBrigades.length);
+                const role = roleIndex < ROLES.length ? ROLES[roleIndex] : null;
+
+                playersToInsert.push({
+                    brigade_id: gameBrigades[brigadeIndex].id,
+                    name: name,
+                    role: role
+                });
+            });
+
+            const { error } = await supabase.from('players').insert(playersToInsert);
+            if (error) throw error;
+
+            setPlayersListText("");
+            setIsPlayerImportOpen(false);
+            fetchPlayers();
+            alert(`Succès! ${playersToInsert.length} joueurs répartis dans ${gameBrigades.length} brigades.`);
+        } catch (error: any) {
+            console.error(error);
+            alert("Erreur d'import : " + error.message);
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
     const deleteGame = async (gameId: string) => {
         if (!confirm("Attention, cela supprimera la partie et toutes ses brigades en cascade. Continuer ?")) return;
         try {
@@ -189,6 +259,9 @@ export default function AdminDashboard() {
                         </TabsTrigger>
                         <TabsTrigger value="brigades" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
                             <Users className="w-4 h-4 mr-3" /> BRIGADES_MGMT
+                        </TabsTrigger>
+                        <TabsTrigger value="players" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
+                            <Users className="w-4 h-4 mr-3" /> PLAYERS_MGMT
                         </TabsTrigger>
                         <TabsTrigger value="settings" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
                             <Settings className="w-4 h-4 mr-3" /> GLOBAL_CONFIG
@@ -376,6 +449,98 @@ export default function AdminDashboard() {
                                         {brigades.length === 0 && (
                                             <TableRow>
                                                 <TableCell colSpan={4} className="text-center py-8 text-muted-foreground font-mono">NO BRIGADES FOUND</TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </CardContent>
+                        </Card>
+                    </TabsContent>
+
+                    {/* PLAYERS TAB */}
+                    <TabsContent value="players" className="mt-0 space-y-6">
+                        <div className="flex justify-between items-center bg-background z-10 sticky top-0 py-2">
+                            <div>
+                                <h2 className="text-2xl font-bold font-mono text-white">Player Distribution</h2>
+                                <p className="text-muted-foreground text-sm">Import and distribute players into brigades with roles.</p>
+                            </div>
+                            <Dialog open={isPlayerImportOpen} onOpenChange={setIsPlayerImportOpen}>
+                                <DialogTrigger asChild>
+                                    <Button className="font-mono bg-secondary hover:bg-secondary/80 text-secondary-foreground">
+                                        <Plus className="w-4 h-4 mr-2" /> IMPORT_PLAYERS
+                                    </Button>
+                                </DialogTrigger>
+                                <DialogContent className="glass-panel border-white/10 bg-background/95 sm:max-w-[425px]">
+                                    <DialogHeader>
+                                        <DialogTitle className="font-mono text-xl">Import & Distribute</DialogTitle>
+                                        <DialogDescription>Paste a list of names. They will be evenly distributed into the brigades of the selected game, and assigned unique rules within their brigade.</DialogDescription>
+                                    </DialogHeader>
+                                    <div className="grid gap-4 py-4">
+                                        <div className="grid gap-2">
+                                            <Label className="font-mono text-muted-foreground">TARGET_GAME</Label>
+                                            <select
+                                                className="flex h-10 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary font-mono"
+                                                value={importGameId}
+                                                onChange={(e) => setImportGameId(e.target.value)}
+                                            >
+                                                <option value="" disabled className="bg-background text-muted-foreground">Select a game...</option>
+                                                {games.map(g => (
+                                                    <option key={g.id} value={g.id} className="bg-background text-white">{g.name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label className="font-mono text-muted-foreground">NAMES_LIST (1 per line)</Label>
+                                            <textarea
+                                                className="flex min-h-[150px] w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary font-mono"
+                                                placeholder="John Doe&#10;Jane Smith&#10;Alice..."
+                                                value={playersListText}
+                                                onChange={(e) => setPlayersListText(e.target.value)}
+                                            />
+                                        </div>
+                                    </div>
+                                    <DialogFooter>
+                                        <Button
+                                            onClick={importAndDistributePlayers}
+                                            disabled={isImporting || !playersListText || !importGameId}
+                                            className="font-mono bg-secondary hover:bg-secondary/80 text-secondary-foreground w-full"
+                                        >
+                                            {isImporting ? "PROCESSING..." : "DISTRIBUTE_ROLES"}
+                                        </Button>
+                                    </DialogFooter>
+                                </DialogContent>
+                            </Dialog>
+                        </div>
+
+                        <Card className="glass-panel border-white/10 bg-background/50">
+                            <CardContent className="p-0 max-h-[600px] overflow-auto">
+                                <Table>
+                                    <TableHeader className="bg-white/5 sticky top-0 z-10">
+                                        <TableRow className="border-white/10 hover:bg-transparent">
+                                            <TableHead className="font-mono text-primary">PLAYER_NAME</TableHead>
+                                            <TableHead className="font-mono text-primary">BRIGADE CODE</TableHead>
+                                            <TableHead className="font-mono text-primary">ROLE</TableHead>
+                                            <TableHead className="font-mono text-primary">GAME</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {players.map((p) => {
+                                            const brigade = brigades.find(b => b.id === p.brigade_id);
+                                            const brigadeCode = brigade?.code || "Unknown";
+                                            const gameName = games.find(g => g.id === brigade?.game_id)?.name || "Unknown Game";
+
+                                            return (
+                                                <TableRow key={p.id} className="border-white/10 hover:bg-white/5">
+                                                    <TableCell className="font-bold">{p.name}</TableCell>
+                                                    <TableCell className="font-mono text-secondary">{brigadeCode}</TableCell>
+                                                    <TableCell className="font-mono text-xs text-muted-foreground">{p.role || "No Role"}</TableCell>
+                                                    <TableCell className="font-mono text-xs text-muted-foreground">{gameName}</TableCell>
+                                                </TableRow>
+                                            )
+                                        })}
+                                        {players.length === 0 && (
+                                            <TableRow>
+                                                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground font-mono">NO PLAYERS FOUND</TableCell>
                                             </TableRow>
                                         )}
                                     </TableBody>
