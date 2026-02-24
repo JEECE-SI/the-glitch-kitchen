@@ -2,16 +2,30 @@
 
 import { useState } from "react";
 import { useParams } from "next/navigation";
-import { Lock, FileText, Database, Shield, Zap, Terminal, Activity } from "lucide-react";
+import { Lock, FileText, Database, Shield, Zap, Terminal, Activity, ListOrdered } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Label } from "@/components/ui/label";
 
 export default function PlayerDashboard() {
     const params = useParams();
     const brigadeId = params.brigade_id as string;
     const [activeTab, setActiveTab] = useState("intel");
+
+    // State for the recipe notebook
+    const [recipeSteps, setRecipeSteps] = useState<{ fragments: string; notes: string }[]>(
+        Array.from({ length: 10 }, () => ({ fragments: "", notes: "" }))
+    );
+
+    const updateRecipeStep = (index: number, field: "fragments" | "notes", value: string) => {
+        const newSteps = [...recipeSteps];
+        newSteps[index] = { ...newSteps[index], [field]: value };
+        setRecipeSteps(newSteps);
+    };
 
     return (
         <div className="min-h-screen flex flex-col p-4 md:p-8 bg-background relative overflow-hidden">
@@ -49,9 +63,10 @@ export default function PlayerDashboard() {
             {/* Main Content */}
             <div className="flex-1 max-w-6xl mx-auto w-full">
                 <Tabs defaultValue="intel" onValueChange={setActiveTab} className="w-full">
-                    <TabsList className="grid w-full grid-cols-4 mb-8 bg-white/5 border border-white/10 p-1 rounded-xl">
+                    <TabsList className="grid w-full grid-cols-2 md:grid-cols-5 mb-8 bg-white/5 border border-white/10 p-1 rounded-xl">
                         <TabsTrigger value="intel" className="font-mono text-xs md:text-sm data-[state=active]:bg-primary/20 glass-panel">INTEL_FEED</TabsTrigger>
                         <TabsTrigger value="inventory" className="font-mono text-xs md:text-sm data-[state=active]:bg-secondary/20 glass-panel">INVENTORY</TabsTrigger>
+                        <TabsTrigger value="recipe" className="font-mono text-xs md:text-sm data-[state=active]:bg-green-500/20 glass-panel">RECIPE_NOTES</TabsTrigger>
                         <TabsTrigger value="contests" className="font-mono text-xs md:text-sm data-[state=active]:bg-primary/20 glass-panel">ACTIVE_CONTESTS</TabsTrigger>
                         <TabsTrigger value="power" className="font-mono text-xs md:text-sm data-[state=active]:bg-destructive/20 glass-panel">EXECUTE_POWER</TabsTrigger>
                     </TabsList>
@@ -81,17 +96,26 @@ export default function PlayerDashboard() {
                                 <CardHeader className="border-b border-white/5 pb-4">
                                     <CardTitle className="font-mono text-lg flex items-center gap-2 text-primary">
                                         <Shield className="w-5 h-5" />
-                                        BRIGADE_ROSTER
+                                        BRIGADE_STATUS
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="flex-1 overflow-auto p-4">
-                                    <div className="flex flex-col gap-3">
+                                    <div className="flex flex-col gap-4 font-mono text-sm">
                                         <div className="flex items-center justify-between p-3 rounded bg-white/5 border border-white/5">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center border border-primary text-primary font-bold">1</div>
-                                                <span className="font-mono font-bold">NeoChef99</span>
-                                            </div>
-                                            <Badge variant="outline" className="text-primary border-primary">Hack_Chef</Badge>
+                                            <span className="text-muted-foreground">NETWORK_LINK</span>
+                                            <span className="text-green-400">SECURE</span>
+                                        </div>
+                                        <div className="flex items-center justify-between p-3 rounded bg-white/5 border border-white/5">
+                                            <span className="text-muted-foreground">DB_ENCRYPTION</span>
+                                            <span className="text-green-400">ACTIVE</span>
+                                        </div>
+                                        <div className="flex items-center justify-between p-3 rounded bg-white/5 border border-white/5">
+                                            <span className="text-muted-foreground">SYSTEM_INTEGRITY</span>
+                                            <span className="text-primary">99.9%</span>
+                                        </div>
+                                        <div className="flex items-center justify-between p-3 rounded bg-white/5 border border-white/5">
+                                            <span className="text-muted-foreground">ROLE_ASSIGNMENT</span>
+                                            <Badge variant="outline" className="text-primary border-primary">PENDING...</Badge>
                                         </div>
                                     </div>
                                 </CardContent>
@@ -120,6 +144,56 @@ export default function PlayerDashboard() {
                                     SUBMIT_RECIPE (0/15)
                                 </Button>
                             </CardFooter>
+                        </Card>
+                    </TabsContent>
+
+                    <TabsContent value="recipe" className="space-y-6">
+                        <Card className="glass-panel border-white/10">
+                            <CardHeader>
+                                <CardTitle className="font-mono text-green-500 flex items-center gap-2">
+                                    <ListOrdered className="w-5 h-5" />
+                                    RECIPE_ASSEMBLY_LOG
+                                </CardTitle>
+                                <CardDescription>Track your recipe steps, fragments assigned, and personal notes.</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <Accordion type="single" collapsible className="w-full">
+                                    {recipeSteps.map((step, index) => (
+                                        <AccordionItem value={`step-${index + 1}`} key={index} className="border-white/10 px-2 lg:px-4">
+                                            <AccordionTrigger className="font-mono hover:text-green-400 hover:no-underline">
+                                                <div className="flex items-center gap-4 text-left">
+                                                    <span>STEP_{String(index + 1).padStart(2, '0')}</span>
+                                                    <span className="text-xs text-muted-foreground font-sans font-normal">
+                                                        {step.fragments ? `[FRAGS: ${step.fragments.length > 20 ? step.fragments.substring(0, 20) + '...' : step.fragments}]` : "[EMPTY]"}
+                                                    </span>
+                                                </div>
+                                            </AccordionTrigger>
+                                            <AccordionContent className="space-y-4 pt-4 pb-4">
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                    <div className="space-y-2 md:col-span-1">
+                                                        <Label className="text-white font-mono text-xs">Fragments Recovered</Label>
+                                                        <Input
+                                                            placeholder="e.g. #3, #7, #12"
+                                                            className="bg-background/50 border-white/10 font-mono text-sm uppercase text-white"
+                                                            value={step.fragments}
+                                                            onChange={(e) => updateRecipeStep(index, "fragments", e.target.value)}
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-2 md:col-span-2">
+                                                        <Label className="text-white font-mono text-xs">Analysis & Notes</Label>
+                                                        <textarea
+                                                            className="flex min-h-[80px] w-full rounded-md border border-white/10 bg-background/50 px-3 py-2 text-sm text-white placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/20 disabled:cursor-not-allowed disabled:opacity-50 font-mono"
+                                                            placeholder="Enter deductions, ingredient guesses, etc..."
+                                                            value={step.notes}
+                                                            onChange={(e) => updateRecipeStep(index, "notes", e.target.value)}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </AccordionContent>
+                                        </AccordionItem>
+                                    ))}
+                                </Accordion>
+                            </CardContent>
                         </Card>
                     </TabsContent>
 

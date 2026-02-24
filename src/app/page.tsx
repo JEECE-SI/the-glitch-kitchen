@@ -9,15 +9,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 
 export default function LandingPage() {
   const [brigadeCode, setBrigadeCode] = useState("");
-  const [playerName, setPlayerName] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!brigadeCode || !playerName) return;
+    if (!brigadeCode) return;
     setLoading(true);
-    // TODO: Verify brigade code and create player with Supabase
+    // TODO: Verify brigade code with Supabase
     setTimeout(() => {
       // Mock join
       router.push(`/player/${brigadeCode.toUpperCase()}`);
@@ -58,17 +57,6 @@ export default function LandingPage() {
           <CardContent>
             <form onSubmit={handleJoin} className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium font-mono text-primary">PLAYER_NAME</label>
-                <Input
-                  type="text"
-                  placeholder="e.g. NeoChef99"
-                  value={playerName}
-                  onChange={(e) => setPlayerName(e.target.value)}
-                  className="bg-background/50 border-white/10 text-white placeholder:text-muted-foreground focus-visible:ring-primary font-mono"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
                 <label className="text-sm font-medium font-mono text-secondary">BRIGADE_ID</label>
                 <Input
                   type="text"
@@ -85,7 +73,7 @@ export default function LandingPage() {
                 className="w-full font-mono font-bold bg-primary hover:bg-primary/80 text-primary-foreground mt-6 transition-all glitch-hover"
                 disabled={loading}
               >
-                {loading ? "AUTHENTICATING..." : "JOIN_BRIGADE"}
+                {loading ? "AUTHENTICATING..." : "ACCESS_NETWORK"}
               </Button>
             </form>
           </CardContent>
