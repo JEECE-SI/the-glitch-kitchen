@@ -19,6 +19,7 @@ export default function AdminDashboard() {
     const [games, setGames] = useState<any[]>([]);
     const [brigades, setBrigades] = useState<any[]>([]);
     const [players, setPlayers] = useState<any[]>([]);
+    const [staffList, setStaffList] = useState<any[]>([]);
 
     const [catalogRoles, setCatalogRoles] = useState<any[]>([]);
     const [catalogMissions, setCatalogMissions] = useState<any[]>([]);
@@ -27,6 +28,7 @@ export default function AdminDashboard() {
     const [isGameDialogOpen, setIsGameDialogOpen] = useState(false);
     const [newGameName, setNewGameName] = useState("");
     const [newBrigadeCount, setNewBrigadeCount] = useState(10);
+    const [cycleSettings, setCycleSettings] = useState({ annonce: 4, contests: 7, temps_libre: 9 });
     const [isDeploying, setIsDeploying] = useState(false);
 
     const [isBrigadeDialogOpen, setIsBrigadeDialogOpen] = useState(false);
@@ -38,6 +40,7 @@ export default function AdminDashboard() {
         fetchGames();
         fetchBrigades();
         fetchPlayers();
+        fetchStaff();
         fetchCatalogRoles();
         fetchCatalogMissions();
         fetchCatalogContests();
@@ -66,6 +69,11 @@ export default function AdminDashboard() {
     const fetchPlayers = async () => {
         const { data } = await supabase.from('players').select('*').order('created_at', { ascending: false });
         if (data) setPlayers(data);
+    };
+
+    const fetchStaff = async () => {
+        const { data } = await supabase.from('staff').select('*').order('created_at', { ascending: false });
+        if (data) setStaffList(data);
     };
 
     const fetchCatalogRoles = async () => {
@@ -128,7 +136,11 @@ export default function AdminDashboard() {
             // 1. Create Game
             const { data: game, error: gameError } = await supabase
                 .from('games')
-                .insert({ name: newGameName, status: 'setup' })
+                .insert({
+                    name: newGameName,
+                    status: 'setup',
+                    settings: cycleSettings
+                })
                 .select()
                 .single();
 
@@ -155,10 +167,24 @@ export default function AdminDashboard() {
             const { error: brigadeError } = await supabase.from('brigades').insert(brigadesToInsert);
             if (brigadeError) throw brigadeError;
 
+            // 3. Create Staff
+            let staffCode;
+            do {
+                staffCode = generateRandomCode();
+            } while (usedCodes.has(staffCode));
+
+            const { error: staffError } = await supabase.from('staff').insert({
+                game_id: game.id,
+                code: staffCode
+            });
+
+            if (staffError) throw staffError;
+
             setNewGameName("");
             setIsGameDialogOpen(false);
             fetchGames();
             fetchBrigades();
+            fetchStaff(); // Add staff refresh
         } catch (error: any) {
             console.error(error);
             alert("Erreur lors de la création : " + error.message);
@@ -258,6 +284,7 @@ export default function AdminDashboard() {
             await supabase.from('games').delete().eq('id', gameId);
             fetchGames();
             fetchBrigades();
+            fetchStaff();
         } catch (error) {
             console.error(error);
         }
@@ -356,6 +383,35 @@ export default function AdminDashboard() {
                                                 className="bg-white/5 border-white/10 font-mono"
                                             />
                                         </div>
+                                        <div className="grid grid-cols-3 gap-2 mt-2">
+                                            <div className="grid gap-2">
+                                                <Label className="font-mono text-xs text-muted-foreground">ANNONCE (MIN)</Label>
+                                                <Input
+                                                    type="number"
+                                                    value={cycleSettings.annonce}
+                                                    onChange={(e) => setCycleSettings({ ...cycleSettings, annonce: parseInt(e.target.value) || 0 })}
+                                                    className="bg-white/5 border-white/10 font-mono text-xs"
+                                                />
+                                            </div>
+                                            <div className="grid gap-2">
+                                                <Label className="font-mono text-xs text-muted-foreground">CONTESTS (MIN)</Label>
+                                                <Input
+                                                    type="number"
+                                                    value={cycleSettings.contests}
+                                                    onChange={(e) => setCycleSettings({ ...cycleSettings, contests: parseInt(e.target.value) || 0 })}
+                                                    className="bg-white/5 border-white/10 font-mono text-xs"
+                                                />
+                                            </div>
+                                            <div className="grid gap-2">
+                                                <Label className="font-mono text-xs text-muted-foreground">TEMPS LIBRE (MIN)</Label>
+                                                <Input
+                                                    type="number"
+                                                    value={cycleSettings.temps_libre}
+                                                    onChange={(e) => setCycleSettings({ ...cycleSettings, temps_libre: parseInt(e.target.value) || 0 })}
+                                                    className="bg-white/5 border-white/10 font-mono text-xs"
+                                                />
+                                            </div>
+                                        </div>
                                     </div>
                                     <DialogFooter>
                                         <Button
@@ -376,38 +432,43 @@ export default function AdminDashboard() {
                                     <TableHeader className="bg-white/5">
                                         <TableRow className="border-white/10 hover:bg-transparent">
                                             <TableHead className="font-mono text-primary">NAME</TableHead>
+                                            <TableHead className="font-mono text-primary">STAFF CODE</TableHead>
                                             <TableHead className="font-mono text-primary">STATUS</TableHead>
                                             <TableHead className="font-mono text-primary">CREATED</TableHead>
                                             <TableHead className="text-right font-mono text-primary">ACTIONS</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {games.map((g) => (
-                                            <TableRow key={g.id} className="border-white/10 hover:bg-white/5">
-                                                <TableCell className="font-bold">{g.name}</TableCell>
-                                                <TableCell>
-                                                    <span className={`px-2 py-1 rounded text-xs font-mono uppercase ${g.status === 'setup' ? 'bg-secondary/20 text-secondary' : g.status === 'active' ? 'bg-green-500/20 text-green-500' : 'bg-muted text-muted-foreground'}`}>
-                                                        {g.status}
-                                                    </span>
-                                                </TableCell>
-                                                <TableCell className="text-muted-foreground text-sm font-mono">
-                                                    {new Date(g.created_at).toLocaleDateString()}
-                                                </TableCell>
-                                                <TableCell className="text-right space-x-2">
-                                                    {g.status === 'setup' && (
-                                                        <Button variant="ghost" size="icon" title="Lancer" onClick={() => changeGameStatus(g.id, 'active')} className="h-8 w-8 hover:text-green-500"><PlaySquare className="w-4 h-4" /></Button>
-                                                    )}
-                                                    {g.status === 'active' && (
-                                                        <Button variant="ghost" size="icon" title="Arrêter" onClick={() => changeGameStatus(g.id, 'finished')} className="h-8 w-8 hover:text-orange-500"><Square className="w-4 h-4" /></Button>
-                                                    )}
-                                                    <Button variant="ghost" size="icon" title="Ouvrir Game Master" onClick={() => goToGameMaster(g.id)} className="h-8 w-8 hover:text-secondary"><Settings2 className="w-4 h-4" /></Button>
-                                                    <Button variant="ghost" size="icon" title="Supprimer" onClick={() => deleteGame(g.id)} className="h-8 w-8 hover:text-destructive"><Trash2 className="w-4 h-4" /></Button>
-                                                </TableCell>
-                                            </TableRow>
-                                        ))}
+                                        {games.map((g) => {
+                                            const staffData = staffList.find((s: any) => s.game_id === g.id);
+                                            return (
+                                                <TableRow key={g.id} className="border-white/10 hover:bg-white/5">
+                                                    <TableCell className="font-bold">{g.name}</TableCell>
+                                                    <TableCell className="font-mono text-secondary text-sm">{staffData?.code || 'None'}</TableCell>
+                                                    <TableCell>
+                                                        <span className={`px-2 py-1 rounded text-xs font-mono uppercase ${g.status === 'setup' ? 'bg-secondary/20 text-secondary' : g.status === 'active' ? 'bg-green-500/20 text-green-500' : 'bg-muted text-muted-foreground'}`}>
+                                                            {g.status}
+                                                        </span>
+                                                    </TableCell>
+                                                    <TableCell className="text-muted-foreground text-sm font-mono">
+                                                        {new Date(g.created_at).toLocaleDateString()}
+                                                    </TableCell>
+                                                    <TableCell className="text-right space-x-2">
+                                                        {g.status === 'setup' && (
+                                                            <Button variant="ghost" size="icon" title="Lancer" onClick={() => changeGameStatus(g.id, 'active')} className="h-8 w-8 hover:text-green-500"><PlaySquare className="w-4 h-4" /></Button>
+                                                        )}
+                                                        {g.status === 'active' && (
+                                                            <Button variant="ghost" size="icon" title="Arrêter" onClick={() => changeGameStatus(g.id, 'finished')} className="h-8 w-8 hover:text-orange-500"><Square className="w-4 h-4" /></Button>
+                                                        )}
+                                                        <Button variant="ghost" size="icon" title="Ouvrir Game Master" onClick={() => goToGameMaster(g.id)} className="h-8 w-8 hover:text-secondary"><Settings2 className="w-4 h-4" /></Button>
+                                                        <Button variant="ghost" size="icon" title="Supprimer" onClick={() => deleteGame(g.id)} className="h-8 w-8 hover:text-destructive"><Trash2 className="w-4 h-4" /></Button>
+                                                    </TableCell>
+                                                </TableRow>
+                                            )
+                                        })}
                                         {games.length === 0 && (
                                             <TableRow>
-                                                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground font-mono">NO ACTIVE INSTANCES</TableCell>
+                                                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground font-mono">NO ACTIVE INSTANCES</TableCell>
                                             </TableRow>
                                         )}
                                     </TableBody>
@@ -478,6 +539,7 @@ export default function AdminDashboard() {
                                     <TableHeader className="bg-white/5">
                                         <TableRow className="border-white/10 hover:bg-transparent">
                                             <TableHead className="font-mono text-primary">GAME</TableHead>
+                                            <TableHead className="font-mono text-primary">STAFF CODE</TableHead>
                                             <TableHead className="font-mono text-primary">NAME</TableHead>
                                             <TableHead className="font-mono text-primary">CODE</TableHead>
                                             <TableHead className="font-mono text-primary">PRESTIGE</TableHead>
@@ -486,9 +548,11 @@ export default function AdminDashboard() {
                                     <TableBody>
                                         {brigades.map((b) => {
                                             const gameName = games.find(g => g.id === b.game_id)?.name || "Unknown Game";
+                                            const staffData = staffList.find(s => s.game_id === b.game_id);
                                             return (
                                                 <TableRow key={b.id} className="border-white/10 hover:bg-white/5">
                                                     <TableCell className="font-mono text-xs text-muted-foreground">{gameName}</TableCell>
+                                                    <TableCell className="font-mono text-secondary text-xs">{staffData?.code || 'None'}</TableCell>
                                                     <TableCell className="font-bold">{b.name}</TableCell>
                                                     <TableCell className="font-mono text-secondary">{b.code}</TableCell>
                                                     <TableCell className="font-mono">{b.prestige_points}</TableCell>
@@ -497,7 +561,7 @@ export default function AdminDashboard() {
                                         })}
                                         {brigades.length === 0 && (
                                             <TableRow>
-                                                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground font-mono">NO BRIGADES FOUND</TableCell>
+                                                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground font-mono">NO BRIGADES FOUND</TableCell>
                                             </TableRow>
                                         )}
                                     </TableBody>

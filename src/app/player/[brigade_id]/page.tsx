@@ -21,6 +21,14 @@ export default function PlayerDashboard() {
     const [gameId, setGameId] = useState<string | null>(null);
     const [brigadeName, setBrigadeName] = useState("");
     const [brigadeDbId, setBrigadeDbId] = useState("");
+    const [staffCode, setStaffCode] = useState<string | null>(null);
+
+    const [gameState, setGameState] = useState<any>(null);
+    const [cycleTimer, setCycleTimer] = useState(0);
+    const [globalTimer, setGlobalTimer] = useState(0);
+    const [phaseName, setPhaseName] = useState("EN ATTENTE");
+    const [currentCycle, setCurrentCycle] = useState(1);
+    const [isTimerRunning, setIsTimerRunning] = useState(false);
 
     const [gameLogs, setGameLogs] = useState<any[]>([]);
     const [inventory, setInventory] = useState<any[]>([]);
@@ -36,11 +44,17 @@ export default function PlayerDashboard() {
                 setBrigadeName(brigadeData.name);
                 setBrigadeDbId(brigadeData.id);
 
+                const { data: gData } = await supabase.from('games').select('*').eq('id', brigadeData.game_id).single();
+                if (gData) setGameState(gData);
+
                 const { data: playersData } = await supabase.from('players').select('*').eq('brigade_id', brigadeData.id);
                 if (playersData) setPlayers(playersData);
 
                 const { data: logsData } = await supabase.from('game_logs').select('*').eq('game_id', brigadeData.game_id).order('created_at', { ascending: false });
                 if (logsData) setGameLogs(logsData);
+
+                const { data: staffData } = await supabase.from('staff').select('code').eq('game_id', brigadeData.game_id).single();
+                if (staffData) setStaffCode(staffData.code);
 
                 const { data: invData } = await supabase.from('inventory').select('*').eq('brigade_id', brigadeData.id).order('slot_index', { ascending: true });
                 if (invData) setInventory(invData);
@@ -55,6 +69,10 @@ export default function PlayerDashboard() {
             setGameLogs((prev) => [payload.new, ...prev]);
         }).subscribe();
 
+        const gameSub = supabase.channel('public:games').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameId}` }, (payload) => {
+            setGameState(payload.new);
+        }).subscribe();
+
         if (!brigadeDbId) return;
         const invSub = supabase.channel('public:inventory').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'inventory', filter: `brigade_id=eq.${brigadeDbId}` }, (payload) => {
             setInventory((prev) => prev.map(item => item.id === payload.new.id ? payload.new : item));
@@ -62,9 +80,64 @@ export default function PlayerDashboard() {
 
         return () => {
             supabase.removeChannel(logsSub);
+            supabase.removeChannel(gameSub);
             supabase.removeChannel(invSub);
         };
     }, [gameId, brigadeDbId]);
+
+    useEffect(() => {
+        if (!gameState) return;
+
+        // Parse status to get cycle and phase
+        const parts = gameState.status.split('_c');
+        if (parts.length > 1) {
+            setCurrentCycle(parseInt(parts[1]));
+            switch (parts[0]) {
+                case 'annonce': setPhaseName('ANNONCE & DISPATCH'); break;
+                case 'contests': setPhaseName('CONTESTS'); break;
+                case 'temps_libre': setPhaseName('TEMPS LIBRE'); break;
+                default: setPhaseName('EN ATTENTE');
+            }
+        } else {
+            setPhaseName(gameState.status.toUpperCase());
+        }
+
+        // Parse timer
+        if (gameState.active_contest) {
+            try {
+                const timerData = JSON.parse(gameState.active_contest);
+                setIsTimerRunning(timerData.timerActive);
+                if (timerData.timerActive && timerData.updatedAt) {
+                    const elapsedSinceUpdate = Math.floor((Date.now() - timerData.updatedAt) / 1000);
+                    setCycleTimer(Math.max(0, timerData.timeLeft - elapsedSinceUpdate));
+                    setGlobalTimer((timerData.globalTime || 0) + elapsedSinceUpdate);
+                } else {
+                    setCycleTimer(timerData.timeLeft);
+                    setGlobalTimer(timerData.globalTime || 0);
+                }
+            } catch (e) { }
+        } else {
+            setCycleTimer(0);
+            setIsTimerRunning(false);
+            setGlobalTimer(0);
+        }
+    }, [gameState]);
+
+    useEffect(() => {
+        if (!isTimerRunning) return;
+        const interval = setInterval(() => {
+            setCycleTimer(prev => Math.max(0, prev - 1));
+            setGlobalTimer(prev => prev + 1);
+        }, 1000);
+        return () => clearInterval(interval);
+    }, [isTimerRunning]);
+
+    const formatTime = (secs: number) => {
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60).toString().padStart(2, '0');
+        const s = (secs % 60).toString().padStart(2, '0');
+        return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
+    };
 
     const handleDecrypt = async () => {
         if (!decryptInput.trim() || !brigadeDbId || !gameId) return;
@@ -157,6 +230,11 @@ export default function PlayerDashboard() {
                     <p className="text-muted-foreground font-mono text-xs md:text-sm mt-1 pl-5 flex items-center gap-2">
                         <Activity className="w-3 h-3 text-green-500" />
                         SECURE_CONNECTION
+                        {staffCode && (
+                            <span className="ml-2 px-2 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded font-bold">
+                                STAFF: {staffCode}
+                            </span>
+                        )}
                     </p>
                 </div>
                 <div className="flex gap-2 w-full md:w-auto mt-4 md:mt-0">
@@ -202,6 +280,30 @@ export default function PlayerDashboard() {
                     </TabsList>
 
                     <TabsContent value="intel" className="space-y-6">
+                        {/* CURRENT GAME STATUS WIDGET */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="bg-white/5 border border-white/10 p-4 rounded-xl flex flex-col justify-center items-center">
+                                <span className="text-[10px] text-muted-foreground font-mono font-bold mb-1">CYCLE EN COURS</span>
+                                <span className="text-xl font-black font-mono text-white">CYCLE {currentCycle}/4</span>
+                            </div>
+                            <div className="bg-white/5 border border-white/10 p-4 rounded-xl flex flex-col justify-center items-center">
+                                <span className="text-[10px] text-muted-foreground font-mono font-bold mb-1">ÉTAPE</span>
+                                <span className="text-sm font-black font-mono text-primary text-center">{phaseName}</span>
+                            </div>
+                            <div className="bg-white/5 border border-white/10 p-4 rounded-xl flex flex-col justify-center items-center">
+                                <span className="text-[10px] text-muted-foreground font-mono font-bold mb-1">TIMER CYCLE</span>
+                                <span className={`text-2xl font-black font-mono ${cycleTimer <= 60 && isTimerRunning && cycleTimer > 0 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                                    {formatTime(cycleTimer)}
+                                </span>
+                            </div>
+                            <div className="bg-white/5 border border-white/10 p-4 rounded-xl flex flex-col justify-center items-center flex-1">
+                                <span className="text-[10px] text-muted-foreground font-mono font-bold mb-1">TIMER GLOBAL</span>
+                                <span className="text-xl font-black font-mono text-white/70">
+                                    {formatTime(globalTimer)}
+                                </span>
+                            </div>
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <Card className="glass-panel border-white/10 bg-background/50 h-[400px] flex flex-col lg:col-span-2">
                                 <CardHeader className="border-b border-white/5 pb-4">
@@ -475,16 +577,9 @@ export default function PlayerDashboard() {
                                     "{selectedFragment.content}"
                                 </div>
                             </div>
-                            <div>
-                                <h4 className="text-[10px] font-mono text-secondary uppercase mb-1">Decrypted Information</h4>
-                                <div className="bg-secondary/10 p-3 rounded border border-secondary/30 font-bold text-secondary text-sm">
-                                    {selectedFragment.decoding}
-                                </div>
-                            </div>
-                            {(selectedFragment.contest !== '-' || selectedFragment.type) && (
+                            {selectedFragment.contest !== '-' && (
                                 <div className="flex gap-2">
-                                    {selectedFragment.contest !== '-' && <Badge className="bg-yellow-500/20 text-yellow-500 border border-yellow-500/50">CONTEST {selectedFragment.contest}</Badge>}
-                                    <Badge variant="outline">{selectedFragment.type}</Badge>
+                                    <Badge className="bg-yellow-500/20 text-yellow-500 border border-yellow-500/50">CONTEST {selectedFragment.contest}</Badge>
                                 </div>
                             )}
                         </CardContent>
