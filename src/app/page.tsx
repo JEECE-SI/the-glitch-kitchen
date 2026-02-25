@@ -5,22 +5,68 @@ import { useRouter } from "next/navigation";
 import { ChefHat, ServerCrash, Terminal, Skull } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function LandingPage() {
-  const [brigadeCode, setBrigadeCode] = useState("");
+  const [accessCode, setAccessCode] = useState("");
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
   const router = useRouter();
 
-  const handleJoin = async (e: React.FormEvent) => {
+  const handleJoin = async (e: React.FormEvent, role: 'player' | 'staff' | 'admin') => {
     e.preventDefault();
-    if (!brigadeCode) return;
+    if (!accessCode) return;
     setLoading(true);
-    // TODO: Verify brigade code with Supabase
-    setTimeout(() => {
-      // Mock join
-      router.push(`/player/${brigadeCode.toUpperCase()}`);
-    }, 1000);
+    setErrorMsg("");
+
+    const codeUpper = accessCode.toUpperCase();
+
+    try {
+      if (role === 'admin') {
+        // 1. Check Admin Password
+        if (accessCode === 'fnpéç39J0') {
+          const res = await fetch('/api/auth', { method: 'POST', body: JSON.stringify({ role: 'admin', id: 'admin' }) });
+          if (res.ok) {
+            router.push('/admin');
+            return;
+          }
+        }
+        setErrorMsg("Admin password incorrect.");
+      } else {
+        // Since we need supabase client
+        const { supabase } = await import('@/lib/supabase/client');
+
+        if (role === 'player') {
+          // 2. Check Player (Brigade code)
+          const { data: bData } = await supabase.from('brigades').select('id').eq('code', codeUpper).maybeSingle();
+          if (bData) {
+            const res = await fetch('/api/auth', { method: 'POST', body: JSON.stringify({ role: 'player', id: bData.id }) });
+            if (res.ok) {
+              router.push(`/player/${bData.id}`);
+              return;
+            }
+          }
+          setErrorMsg("Brigade code incorrect or not found.");
+        } else if (role === 'staff') {
+          // 3. Check Staff code
+          const { data: sData } = await supabase.from('staff').select('game_id').eq('code', codeUpper).maybeSingle();
+          if (sData) {
+            const res = await fetch('/api/auth', { method: 'POST', body: JSON.stringify({ role: 'staff', id: sData.game_id }) });
+            if (res.ok) {
+              router.push(`/staff/${sData.game_id}`);
+              return;
+            }
+          }
+          setErrorMsg("Staff code incorrect or not found.");
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setErrorMsg("An error occurred during authentication.");
+    }
+
+    setLoading(false);
   };
 
   return (
@@ -52,36 +98,98 @@ export default function LandingPage() {
         <Card className="glass-panel border-primary/20 bg-background/40 backdrop-blur-xl">
           <CardHeader>
             <CardTitle className="text-2xl font-bold font-mono">SYSTEM_LOGIN</CardTitle>
-            <CardDescription>Enter your credentials to access the brigade network.</CardDescription>
+            <CardDescription>Enter your credentials to access the selected network.</CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleJoin} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium font-mono text-secondary">BRIGADE_ID</label>
-                <Input
-                  type="text"
-                  placeholder="Enter 4-digit code"
-                  value={brigadeCode}
-                  onChange={(e) => setBrigadeCode(e.target.value)}
-                  className="bg-background/50 border-white/10 text-white placeholder:text-muted-foreground focus-visible:ring-secondary uppercase font-mono tracking-widest"
-                  maxLength={6}
-                  required
-                />
-              </div>
-              <Button
-                type="submit"
-                className="w-full font-mono font-bold bg-primary hover:bg-primary/80 text-primary-foreground mt-6 transition-all glitch-hover"
-                disabled={loading}
-              >
-                {loading ? "AUTHENTICATING..." : "ACCESS_NETWORK"}
-              </Button>
-            </form>
+            <Tabs defaultValue="player" className="w-full" onValueChange={() => { setAccessCode(""); setErrorMsg(""); }}>
+              <TabsList className="grid w-full grid-cols-3 mb-6 bg-background/50 border border-white/10">
+                <TabsTrigger value="player" className="font-mono text-xs">PLAYER</TabsTrigger>
+                <TabsTrigger value="staff" className="font-mono text-xs">STAFF</TabsTrigger>
+                <TabsTrigger value="admin" className="font-mono text-xs">ADMIN</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="player">
+                <form onSubmit={(e) => handleJoin(e, 'player')} className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium font-mono text-secondary">BRIGADE_CODE</label>
+                    <Input
+                      type="text"
+                      placeholder="Enter brigade code"
+                      value={accessCode}
+                      onChange={(e) => setAccessCode(e.target.value)}
+                      className="bg-background/50 border-white/10 text-white placeholder:text-muted-foreground focus-visible:ring-secondary uppercase font-mono tracking-widest"
+                      maxLength={6}
+                      required
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    className="w-full font-mono font-bold bg-primary hover:bg-primary/80 text-primary-foreground mt-6 transition-all glitch-hover"
+                    disabled={loading}
+                  >
+                    {loading ? "AUTHENTICATING..." : "ACCESS_NETWORK"}
+                  </Button>
+                  {errorMsg && (
+                    <p className="text-red-500 text-xs font-mono font-bold text-center mt-2">{errorMsg}</p>
+                  )}
+                </form>
+              </TabsContent>
+
+              <TabsContent value="staff">
+                <form onSubmit={(e) => handleJoin(e, 'staff')} className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium font-mono text-secondary">STAFF_CODE</label>
+                    <Input
+                      type="text"
+                      placeholder="Enter staff code"
+                      value={accessCode}
+                      onChange={(e) => setAccessCode(e.target.value)}
+                      className="bg-background/50 border-white/10 text-white placeholder:text-muted-foreground focus-visible:ring-secondary uppercase font-mono tracking-widest"
+                      maxLength={10}
+                      required
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    className="w-full font-mono font-bold bg-secondary hover:bg-secondary/80 text-secondary-foreground mt-6 transition-all glitch-hover"
+                    disabled={loading}
+                  >
+                    {loading ? "AUTHENTICATING..." : "STAFF_LOGIN"}
+                  </Button>
+                  {errorMsg && (
+                    <p className="text-red-500 text-xs font-mono font-bold text-center mt-2">{errorMsg}</p>
+                  )}
+                </form>
+              </TabsContent>
+
+              <TabsContent value="admin">
+                <form onSubmit={(e) => handleJoin(e, 'admin')} className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium font-mono text-secondary">ROOT_PASSWORD</label>
+                    <Input
+                      type="password"
+                      placeholder="Enter admin password"
+                      value={accessCode}
+                      onChange={(e) => setAccessCode(e.target.value)}
+                      className="bg-background/50 border-white/10 text-white placeholder:text-muted-foreground focus-visible:ring-secondary font-mono tracking-widest"
+                      maxLength={20}
+                      required
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    className="w-full font-mono font-bold bg-destructive hover:bg-destructive/80 text-destructive-foreground mt-6 transition-all glitch-hover"
+                    disabled={loading}
+                  >
+                    {loading ? "AUTHENTICATING..." : "ROOT_ACCESS"}
+                  </Button>
+                  {errorMsg && (
+                    <p className="text-red-500 text-xs font-mono font-bold text-center mt-2">{errorMsg}</p>
+                  )}
+                </form>
+              </TabsContent>
+            </Tabs>
           </CardContent>
-          <CardFooter className="flex justify-center border-t border-white/5 pt-4 mt-2">
-            <Button variant="link" className="text-xs text-muted-foreground hover:text-white" onClick={() => router.push('/gm')}>
-              Initialize Game Master Override
-            </Button>
-          </CardFooter>
         </Card>
       </div>
     </div>

@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Shield, Play, Pause, Timer, Settings2, Users, Activity, ChevronsRight, AlertTriangle } from "lucide-react";
+import { Shield, Play, Pause, Timer, Settings2, Users, Activity, ChevronsRight, AlertTriangle, Trophy, CheckCircle2 } from "lucide-react";
 
 type GamePhase = 'setup' | 'annonce' | 'contests' | 'temps_libre' | 'finished';
 
@@ -29,6 +29,9 @@ export default function StaffDashboard() {
     const [timeLeft, setTimeLeft] = useState(0); // in seconds
     const [timerActive, setTimerActive] = useState(false);
     const [globalTimer, setGlobalTimer] = useState(0);
+    const [phaseTimers, setPhaseTimers] = useState<{ [key: string]: number }>({});
+    const [cycleContests, setCycleContests] = useState<Record<string, any[]>>({});
+    const [contestAssignments, setContestAssignments] = useState<Record<string, Record<string, string>>>({});
 
     useEffect(() => {
         // Attempt to find game by ID or assume staffId is a code.
@@ -70,6 +73,9 @@ export default function StaffDashboard() {
                             setGlobalTimer(tc.globalTime || 0);
                             setTimerActive(false);
                         }
+                        if (tc.phaseTimers) {
+                            setPhaseTimers(tc.phaseTimers);
+                        }
                     } catch (e) { }
                 }
 
@@ -100,12 +106,38 @@ export default function StaffDashboard() {
     }, [timerActive]);
 
     useEffect(() => {
+        if (game?.status) {
+            const status = game.status as string;
+            if (status === 'finished') {
+                setCurrentPhase('finished');
+            } else if (status.includes('_c')) {
+                const parts = status.split('_c');
+                const ph = parts[0] as GamePhase;
+                const cyc = parseInt(parts[1], 10);
+                if (!isNaN(cyc)) setCurrentCycle(cyc);
+                if (['setup', 'annonce', 'contests', 'temps_libre'].includes(ph)) {
+                    setCurrentPhase(ph);
+                }
+            } else if (status === 'setup') {
+                setCurrentPhase('setup');
+                setCurrentCycle(1);
+            }
+        }
+    }, [game?.status]);
+
+    useEffect(() => {
         if (timeLeft === 0 && timerActive) {
             setTimerActive(false);
-            const syncData = JSON.stringify({ timeLeft: 0, globalTime: globalTimer, timerActive: false, updatedAt: Date.now() });
+            const updatedPhaseTimers = { ...phaseTimers };
+            if (currentPhase !== 'setup' && currentPhase !== 'finished') {
+                updatedPhaseTimers[currentPhase] = 0;
+            }
+            setPhaseTimers(updatedPhaseTimers);
+            const syncData = JSON.stringify({ timeLeft: 0, globalTime: globalTimer, timerActive: false, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers });
+            setGame((prev: any) => ({ ...prev, active_contest: syncData }));
             supabase.from('games').update({ active_contest: syncData }).eq('id', gameId);
         }
-    }, [timeLeft, timerActive, globalTimer, gameId]);
+    }, [timeLeft, timerActive, globalTimer, gameId, phaseTimers, currentPhase]);
 
     const fetchPlayers = async (gId: string) => {
         // Players are linked to brigade, so we fetch players of brigades in this game.
@@ -127,6 +159,64 @@ export default function StaffDashboard() {
         if (data) setCatalogRoles(data);
     };
 
+    useEffect(() => {
+        const fetchContests = async () => {
+            const { data } = await supabase.from('catalog_fragments')
+                .select('*')
+                .like('contest', `${currentCycle}.%`);
+            if (data) {
+                const grouped = data.reduce((acc: any, f: any) => {
+                    const cName = f.contest;
+                    // Ignorer les fragments sans format contest X.Y
+                    if (cName === 'Caché' || !cName) return acc;
+                    if (!acc[cName]) acc[cName] = [];
+                    acc[cName].push(f);
+                    return acc;
+                }, {});
+                setCycleContests(grouped);
+            }
+        };
+        fetchContests();
+    }, [currentCycle]);
+
+    const handleValidateContest = async (contestName: string) => {
+        const assignments = contestAssignments[contestName];
+        if (!assignments) return;
+
+        let anyAssigned = false;
+        for (const [pos, brigadeId] of Object.entries(assignments)) {
+            if (!brigadeId || brigadeId === 'null') continue;
+
+            const frag = cycleContests[contestName]?.find(f => f.position === pos);
+            if (!frag) continue;
+
+            const { data: inv } = await supabase.from('inventory').select('*').eq('brigade_id', brigadeId);
+            if (inv && inv.length > 0) {
+                const alreadyHas = inv.some((slot: any) => slot.fragment_data === frag.fragment_id);
+                if (!alreadyHas) {
+                    const emptySlot = inv.find((slot: any) => !slot.fragment_data);
+                    if (emptySlot) {
+                        await supabase.from('inventory').update({ fragment_data: frag.fragment_id }).eq('id', emptySlot.id);
+                        const brigade = brigades.find(b => b.id === brigadeId);
+                        await supabase.from('game_logs').insert({
+                            game_id: gameId,
+                            brigade_id: brigadeId,
+                            event_type: 'contest_won',
+                            message: `🏆 CONTEST ${contestName} : La ${brigade?.name || 'Brigade'} s'empare de la position ${pos}! Fragment [${frag.fragment_id}] débloqué.`
+                        });
+                        anyAssigned = true;
+                    }
+                }
+            }
+        }
+
+        if (anyAssigned) {
+            alert(`Succès! Les victoires ont été validées pour le Contest ${contestName}. Les fragments correspondants font dorénavant partie de l'inventaire des brigades.`);
+        } else {
+            alert(`Aucun fragment n'a été distribué. Soit aucune brigade n'est sélectionnée, soit elles ont déjà ce fragment, soit leur inventaire est plein.`);
+        }
+    };
+
     const handlePlayerUpdate = async (playerId: string, field: string, value: string) => {
         try {
             await supabase.from('players').update({ [field]: value === 'null' ? null : value }).eq('id', playerId);
@@ -145,30 +235,76 @@ export default function StaffDashboard() {
     };
 
     const startPhase = async (phase: 'annonce' | 'contests' | 'temps_libre') => {
+        const updatedPhaseTimers = { ...phaseTimers };
+        if (currentPhase !== 'setup' && currentPhase !== 'finished') {
+            updatedPhaseTimers[currentPhase] = timeLeft;
+        }
+
+        const t = updatedPhaseTimers[phase] !== undefined ? updatedPhaseTimers[phase] : PHASE_CONFIG[phase].time;
+
         setCurrentPhase(phase);
-        const t = PHASE_CONFIG[phase].time;
         setTimeLeft(t);
+        setPhaseTimers(updatedPhaseTimers);
         setTimerActive(true);
-        const syncData = JSON.stringify({ timeLeft: t, globalTime: globalTimer, timerActive: true, updatedAt: Date.now() });
+
+        const syncData = JSON.stringify({ timeLeft: t, globalTime: globalTimer, timerActive: true, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers });
         // Broadcast phase and timer state to the database
+        setGame((prev: any) => ({ ...prev, status: `${phase}_c${currentCycle}`, active_contest: syncData }));
         await supabase.from('games').update({ status: `${phase}_c${currentCycle}`, active_contest: syncData }).eq('id', gameId);
     };
 
     const startGame = async () => {
+        setGame((prev: any) => ({ ...prev, status: 'active' }));
         await supabase.from('games').update({ status: 'active' }).eq('id', gameId);
     };
 
     const toggleTimer = async () => {
         const newState = !timerActive;
         setTimerActive(newState);
-        const syncData = JSON.stringify({ timeLeft: timeLeft, globalTime: globalTimer, timerActive: newState, updatedAt: Date.now() });
+
+        const updatedPhaseTimers = { ...phaseTimers };
+        if (currentPhase !== 'setup' && currentPhase !== 'finished') {
+            updatedPhaseTimers[currentPhase] = timeLeft;
+            setPhaseTimers(updatedPhaseTimers);
+        }
+
+        const syncData = JSON.stringify({ timeLeft: timeLeft, globalTime: globalTimer, timerActive: newState, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers });
+        setGame((prev: any) => ({ ...prev, active_contest: syncData }));
         await supabase.from('games').update({ active_contest: syncData }).eq('id', gameId);
     };
 
     const adjustTime = async (seconds: number) => {
         const newTime = Math.max(0, timeLeft + seconds);
         setTimeLeft(newTime);
-        const syncData = JSON.stringify({ timeLeft: newTime, globalTime: globalTimer, timerActive, updatedAt: Date.now() });
+
+        const updatedPhaseTimers = { ...phaseTimers };
+        if (currentPhase !== 'setup' && currentPhase !== 'finished') {
+            updatedPhaseTimers[currentPhase] = newTime;
+            setPhaseTimers(updatedPhaseTimers);
+        }
+
+        const syncData = JSON.stringify({ timeLeft: newTime, globalTime: globalTimer, timerActive, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers });
+        setGame((prev: any) => ({ ...prev, active_contest: syncData }));
+        await supabase.from('games').update({ active_contest: syncData }).eq('id', gameId);
+    };
+
+    const resetPhaseTimer = async () => {
+        if (currentPhase === 'setup' || currentPhase === 'finished') return;
+        const t = PHASE_CONFIG[currentPhase as keyof typeof PHASE_CONFIG].time;
+
+        const diff = t - timeLeft;
+        const newGlobalTimer = Math.max(0, globalTimer - diff);
+
+        setTimeLeft(t);
+        setGlobalTimer(newGlobalTimer);
+        setTimerActive(false);
+
+        const updatedPhaseTimers = { ...phaseTimers };
+        updatedPhaseTimers[currentPhase] = t;
+        setPhaseTimers(updatedPhaseTimers);
+
+        const syncData = JSON.stringify({ timeLeft: t, globalTime: newGlobalTimer, timerActive: false, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers });
+        setGame((prev: any) => ({ ...prev, active_contest: syncData }));
         await supabase.from('games').update({ active_contest: syncData }).eq('id', gameId);
     };
 
@@ -179,10 +315,14 @@ export default function StaffDashboard() {
             setCurrentPhase('setup');
             setTimeLeft(0);
             setTimerActive(false);
-            const syncData = JSON.stringify({ timeLeft: 0, globalTime: globalTimer, timerActive: false, updatedAt: Date.now() });
+            setPhaseTimers({});
+
+            const syncData = JSON.stringify({ timeLeft: 0, globalTime: globalTimer, timerActive: false, updatedAt: Date.now(), phaseTimers: {} });
+            setGame((prev: any) => ({ ...prev, status: `setup_c${nextCycle}`, active_contest: syncData }));
             await supabase.from('games').update({ status: `setup_c${nextCycle}`, active_contest: syncData }).eq('id', gameId);
         } else {
             setCurrentPhase('finished');
+            setGame((prev: any) => ({ ...prev, status: 'finished' }));
             await supabase.from('games').update({ status: 'finished' }).eq('id', gameId);
         }
     };
@@ -303,26 +443,93 @@ export default function StaffDashboard() {
                                             </Button>
                                             <Button size="lg" onClick={() => adjustTime(60)} variant="outline" className="font-mono h-16 px-6 border-white/20">+1 MIN</Button>
                                             <Button size="lg" onClick={() => adjustTime(-60)} variant="outline" className="font-mono h-16 px-6 border-white/20">-1 MIN</Button>
+                                            <Button size="lg" onClick={resetPhaseTimer} variant="outline" className="font-mono h-16 px-6 border-white/20 bg-red-500/10 hover:bg-red-500/20 text-red-500 hover:text-red-400" disabled={currentPhase === 'setup'}>RESET</Button>
                                         </div>
                                     </CardContent>
                                     <div className="border-t border-white/5 bg-white/5 grid grid-cols-3 divide-x divide-white/10">
                                         <button onClick={() => startPhase('annonce')} className={`p-4 flex flex-col items-center justify-center gap-2 transition-colors hover:bg-blue-500/10 ${currentPhase === 'annonce' ? 'bg-blue-500/20' : ''}`}>
                                             <span className="font-mono text-xs font-bold text-blue-400">01. ANNONCE</span>
-                                            <span className="font-mono text-[10px] text-muted-foreground">{game?.settings?.annonce || 4} MINUTES</span>
+                                            <span className="font-mono text-[10px] text-muted-foreground">
+                                                {currentPhase === 'annonce' ? `${formatTime(timeLeft)} LEFT` : phaseTimers['annonce'] !== undefined ? `${formatTime(phaseTimers['annonce'])} LEFT` : `${game?.settings?.annonce || 4} MIN`}
+                                            </span>
                                         </button>
                                         <button onClick={() => startPhase('contests')} className={`p-4 flex flex-col items-center justify-center gap-2 transition-colors hover:bg-purple-500/10 ${currentPhase === 'contests' ? 'bg-purple-500/20' : ''}`}>
                                             <span className="font-mono text-xs font-bold text-purple-400">02. CONTESTS</span>
-                                            <span className="font-mono text-[10px] text-muted-foreground">{game?.settings?.contests || 7} MINUTES</span>
+                                            <span className="font-mono text-[10px] text-muted-foreground">
+                                                {currentPhase === 'contests' ? `${formatTime(timeLeft)} LEFT` : phaseTimers['contests'] !== undefined ? `${formatTime(phaseTimers['contests'])} LEFT` : `${game?.settings?.contests || 7} MIN`}
+                                            </span>
                                         </button>
                                         <button onClick={() => startPhase('temps_libre')} className={`p-4 flex flex-col items-center justify-center gap-2 transition-colors hover:bg-green-500/10 ${currentPhase === 'temps_libre' ? 'bg-green-500/20' : ''}`}>
                                             <span className="font-mono text-xs font-bold text-green-400">03. TEMPS LIBRE</span>
-                                            <span className="font-mono text-[10px] text-muted-foreground">{game?.settings?.temps_libre || 9} MINUTES</span>
+                                            <span className="font-mono text-[10px] text-muted-foreground">
+                                                {currentPhase === 'temps_libre' ? `${formatTime(timeLeft)} LEFT` : phaseTimers['temps_libre'] !== undefined ? `${formatTime(phaseTimers['temps_libre'])} LEFT` : `${game?.settings?.temps_libre || 9} MIN`}
+                                            </span>
                                         </button>
                                     </div>
                                 </Card>
 
                                 {/* PHASE INFO & ACTIONS */}
                                 <div className="space-y-6">
+                                    {currentPhase === 'contests' && Object.keys(cycleContests).length > 0 && (
+                                        <Card className="glass-panel border-white/10 bg-background/50">
+                                            <CardHeader className="border-b border-white/5 pb-4">
+                                                <CardTitle className="font-mono text-xl flex items-center gap-2 text-purple-400">
+                                                    <Trophy className="w-5 h-5" />
+                                                    DÉCISION DES CONTESTS
+                                                </CardTitle>
+                                                <CardDescription className="font-mono text-xs">Attribuez les brigades gagnantes pour chaque Contest du cycle actuel. Cela débloquera directement leurs fragments associés.</CardDescription>
+                                            </CardHeader>
+                                            <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                                {Object.entries(cycleContests)
+                                                    .sort(([a], [b]) => a.localeCompare(b))
+                                                    .slice(0, 4)
+                                                    .map(([contestName, fragments]) => (
+                                                        <div key={contestName} className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col justify-between hover:bg-white/10 transition-colors">
+                                                            <div>
+                                                                <h3 className="font-mono font-bold text-white mb-4 flex items-center justify-between">
+                                                                    <span className="bg-purple-500/20 shadow-[0_0_15px_-3px_rgba(147,51,234,0.4)] text-purple-400 px-3 py-1 rounded text-sm tracking-wider w-full text-center">CONTEST {contestName}</span>
+                                                                </h3>
+                                                                <div className="space-y-3 mb-4">
+                                                                    {['1er', '2e', '3e'].map(pos => {
+                                                                        const frag = fragments.find(f => f.position === pos);
+                                                                        if (!frag) return null;
+                                                                        return (
+                                                                            <div key={pos} className="flex flex-col gap-1">
+                                                                                <span className="font-mono text-[10px] text-muted-foreground uppercase">{pos} <span className="text-white/30 text-[8px]">({frag.fragment_id})</span></span>
+                                                                                <select
+                                                                                    className="h-9 w-full bg-black/40 border border-white/10 rounded px-2 font-mono text-xs text-white uppercase focus:border-purple-500 outline-none transition-colors"
+                                                                                    value={contestAssignments[contestName]?.[pos] || 'null'}
+                                                                                    onChange={(e) => setContestAssignments(prev => ({
+                                                                                        ...prev,
+                                                                                        [contestName]: {
+                                                                                            ...(prev[contestName] || {}),
+                                                                                            [pos]: e.target.value
+                                                                                        }
+                                                                                    }))}
+                                                                                >
+                                                                                    <option value="null">-- BRIGADE --</option>
+                                                                                    {brigades.map(b => (
+                                                                                        <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
+                                                                                    ))}
+                                                                                </select>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                            <Button
+                                                                className="w-full font-mono text-xs bg-purple-600 hover:bg-purple-500 text-white shadow-[0_0_15px_-3px_rgba(147,51,234,0.4)] transition-all active:scale-95"
+                                                                onClick={() => handleValidateContest(contestName)}
+                                                            >
+                                                                <CheckCircle2 className="w-4 h-4 mr-2" />
+                                                                VALIDER VICTOIRE
+                                                            </Button>
+                                                        </div>
+                                                    ))}
+                                            </CardContent>
+                                        </Card>
+                                    )}
+
                                     <Card className="glass-panel border-white/10 bg-background/50 h-full">
                                         <CardHeader>
                                             <CardTitle className="font-mono text-sm text-muted-foreground">PHASE_DIRECTIVES</CardTitle>

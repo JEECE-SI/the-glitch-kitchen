@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Database, Plus, Settings, Users, Server, Trash2, Settings2, PlaySquare, Square } from "lucide-react";
+import * as XLSX from "xlsx";
 
 export default function AdminDashboard() {
     const router = useRouter();
@@ -35,6 +36,16 @@ export default function AdminDashboard() {
     const [newBrigadeName, setNewBrigadeName] = useState("");
     const [selectedGameId, setSelectedGameId] = useState("");
     const [isCreatingBrigade, setIsCreatingBrigade] = useState(false);
+
+    const [isMassDeployOpen, setIsMassDeployOpen] = useState(false);
+    const [massDeployPrefix, setMassDeployPrefix] = useState("Session");
+    const [massGameCount, setMassGameCount] = useState(2);
+    const [massBrigadeCount, setMassBrigadeCount] = useState(5);
+    const [isMassDeploying, setIsMassDeploying] = useState(false);
+    // massPlayers holds the list of players to be distributed: { name, poste }
+    const [massPlayers, setMassPlayers] = useState<{ name: string; poste: string }[]>([]);
+    const [massManualText, setMassManualText] = useState(""); // manual input: "Prenom Nom,Poste" per line
+    const [massExcelFileName, setMassExcelFileName] = useState("");
 
     useEffect(() => {
         fetchGames();
@@ -139,12 +150,14 @@ export default function AdminDashboard() {
                 .insert({
                     name: newGameName,
                     status: 'setup',
-                    settings: cycleSettings
                 })
                 .select()
                 .single();
 
             if (gameError) throw gameError;
+
+            // Try to save cycleSettings — only works after the migration_recipe_tests.sql migration is applied
+            await supabase.from('games').update({ settings: cycleSettings }).eq('id', game.id);
 
             // 2. Generate Brigades
             const brigadesToInsert = [];
@@ -193,6 +206,181 @@ export default function AdminDashboard() {
         }
     };
 
+    const handleMassExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setMassExcelFileName(file.name);
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            const bstr = evt.target?.result;
+            const wb = XLSX.read(bstr, { type: 'binary' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const data = XLSX.utils.sheet_to_json(ws);
+            const parsed: { name: string; poste: string }[] = [];
+            data.forEach((row: any) => {
+                const nom = row['Nom'] || row['nom'] || row['NOM'] || '';
+                const prenom = row['Prénom'] || row['Prenom'] || row['prenom'] || row['PRENOM'] || '';
+                const poste = row['Poste'] || row['poste'] || row['POSTE'] || row['JE'] || row['je'] || '';
+                const fullName = `${prenom} ${nom}`.trim();
+                if (fullName) parsed.push({ name: fullName, poste: String(poste).trim() });
+            });
+            if (parsed.length > 0) {
+                setMassPlayers(prev => {
+                    // merge, deduplicate by name
+                    const existing = new Set(prev.map(p => p.name));
+                    return [...prev, ...parsed.filter(p => !existing.has(p.name))];
+                });
+            } else {
+                alert("Aucun joueur trouvé. Vérifiez les colonnes 'Nom', 'Prénom'.");
+            }
+        };
+        reader.readAsBinaryString(file);
+    };
+
+    const handleMassManualAdd = () => {
+        const lines = massManualText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        const parsed: { name: string; poste: string }[] = lines.map(line => {
+            const parts = line.split(',');
+            const name = (parts[0] || '').trim();
+            const poste = (parts[1] || '').trim();
+            return { name, poste };
+        }).filter(p => p.name.length > 0);
+        if (parsed.length > 0) {
+            setMassPlayers(prev => {
+                const existing = new Set(prev.map(p => p.name));
+                return [...prev, ...parsed.filter(p => !existing.has(p.name))];
+            });
+            setMassManualText("");
+        }
+    };
+
+    /**
+     * Smart role distribution:
+     * - Each player has a preferred role based on their "poste" (matched to catalog roles by title).
+     * - We process groups of players sorted by rarity of their preferred role (rarest first).
+     * - For each brigade, we assign each player their preferred role if not already taken in that brigade.
+     * - If the preferred role is already used in that brigade, we assign any role not yet used in that brigade.
+     * - If all roles are used, we assign null.
+     */
+    const smartDistribute = (
+        playerList: { name: string; poste: string }[],
+        brigadeList: any[],
+        availableRoles: string[]
+    ): { brigade_id: string; name: string; role: string | null }[] => {
+        // Map poste -> role (match by title, case-insensitive)
+        const getPreferredRole = (poste: string): string | null => {
+            if (!poste) return null;
+            const match = availableRoles.find(r => r.toLowerCase() === poste.toLowerCase());
+            return match || null;
+        };
+
+        // Group players by preferred role
+        const byRole: Map<string | null, { name: string; poste: string }[]> = new Map();
+        playerList.forEach(p => {
+            const role = getPreferredRole(p.poste);
+            if (!byRole.has(role)) byRole.set(role, []);
+            byRole.get(role)!.push(p);
+        });
+
+        // Sort roles by count ascending (rarer roles first)
+        const sortedRoles = Array.from(byRole.entries()).sort((a, b) => a[1].length - b[1].length);
+
+        // Build ordered player list: rarest role first
+        const orderedPlayers: { name: string; poste: string; preferredRole: string | null }[] = [];
+        sortedRoles.forEach(([role, players]) => {
+            players.forEach(p => orderedPlayers.push({ ...p, preferredRole: role }));
+        });
+
+        // Track roles used per brigade
+        const brigadeRolesUsed: Map<string, Set<string>> = new Map();
+        brigadeList.forEach(b => brigadeRolesUsed.set(b.id, new Set()));
+
+        const result: { brigade_id: string; name: string; role: string | null }[] = [];
+
+        // Assign players round-robin across brigades
+        orderedPlayers.forEach((player, i) => {
+            const brigade = brigadeList[i % brigadeList.length];
+            const usedRoles = brigadeRolesUsed.get(brigade.id)!;
+
+            let assignedRole: string | null = null;
+
+            if (player.preferredRole && !usedRoles.has(player.preferredRole)) {
+                // Preferred role is free in this brigade
+                assignedRole = player.preferredRole;
+            } else {
+                // Find any unused role in this brigade
+                const freeRole = availableRoles.find(r => !usedRoles.has(r));
+                assignedRole = freeRole || null;
+            }
+
+            if (assignedRole) usedRoles.add(assignedRole);
+            result.push({ brigade_id: brigade.id, name: player.name, role: assignedRole });
+        });
+
+        return result;
+    };
+
+    const massDeployInstances = async () => {
+        if (!massDeployPrefix || massGameCount <= 0 || massBrigadeCount <= 0) return;
+        if (massPlayers.length === 0) {
+            alert("Ajoutez d'abord des joueurs à la liste.");
+            return;
+        }
+        setIsMassDeploying(true);
+        try {
+            const allNewBrigades: any[] = [];
+            const usedCodes = new Set();
+            const generateCodeUnique = () => {
+                let code;
+                do { code = generateRandomCode(); } while (usedCodes.has(code));
+                usedCodes.add(code);
+                return code;
+            };
+
+            for (let i = 0; i < massGameCount; i++) {
+                // 1. Create Game
+                const { data: game, error: gameError } = await supabase
+                    .from('games')
+                    .insert({ name: `${massDeployPrefix} - ${i + 1}`, status: 'setup' })
+                    .select().single();
+                if (gameError) throw gameError;
+                await supabase.from('games').update({ settings: cycleSettings }).eq('id', game.id);
+
+                // 2. Generate Brigades
+                const brigadesToInsert = Array.from({ length: massBrigadeCount }, (_, j) => ({
+                    game_id: game.id,
+                    code: generateCodeUnique(),
+                    name: `Brigade ${j + 1}`
+                }));
+                const { data: createdBrigades, error: brigadeError } = await supabase.from('brigades').insert(brigadesToInsert).select();
+                if (brigadeError) throw brigadeError;
+                allNewBrigades.push(...createdBrigades);
+
+                // 3. Create Staff
+                const { error: staffError } = await supabase.from('staff').insert({ game_id: game.id, code: generateCodeUnique() });
+                if (staffError) throw staffError;
+            }
+
+            // 4. Smart Distribute Players across ALL new brigades
+            const playersToInsert = smartDistribute(massPlayers, allNewBrigades, ROLES);
+
+            const { error: playerError } = await supabase.from('players').insert(playersToInsert);
+            if (playerError) throw playerError;
+
+            setMassDeployPrefix("Session");
+            setMassPlayers([]);
+            setMassExcelFileName("");
+            setIsMassDeployOpen(false);
+            fetchGames(); fetchBrigades(); fetchStaff(); fetchPlayers();
+            alert(`Succès! ${massGameCount} parties créées, ${playersToInsert.length} joueurs répartis dans ${allNewBrigades.length} brigades.`);
+        } catch (error: any) {
+            console.error(error);
+            alert("Erreur : " + error.message);
+        } finally {
+            setIsMassDeploying(false);
+        }
+    };
+
     const createSingleBrigade = async () => {
         if (!newBrigadeName || !selectedGameId) return;
         setIsCreatingBrigade(true);
@@ -229,17 +417,56 @@ export default function AdminDashboard() {
     const ROLES = catalogRoles.map(r => r.title);
 
     const [isPlayerImportOpen, setIsPlayerImportOpen] = useState(false);
-    const [playersListText, setPlayersListText] = useState("");
+    const [playersListText, setPlayersListText] = useState(""); // Keeping this just in case, though unused now in UI
     const [importGameId, setImportGameId] = useState("");
     const [isImporting, setIsImporting] = useState(false);
+    const [importedNames, setImportedNames] = useState<string[]>([]);
+    const [importFileName, setImportFileName] = useState("");
+
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setImportFileName(file.name);
+
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            const bstr = evt.target?.result;
+            const wb = XLSX.read(bstr, { type: 'binary' });
+            const wsname = wb.SheetNames[0];
+            const ws = wb.Sheets[wsname];
+            const data = XLSX.utils.sheet_to_json(ws);
+
+            const names: string[] = [];
+            data.forEach((row: any) => {
+                // Ensure field names are case-insensitive or close enough, user requested "Nom Prénom JE et Poste"
+                // Let's look for combinations of Nom/Prenom
+                const nomInfo = row['Nom'] || row['nom'] || row['NOM'];
+                const prenomInfo = row['Prénom'] || row['Prenom'] || row['prenom'] || row['PRENOM'];
+
+                if (nomInfo || prenomInfo) {
+                    const fullName = `${prenomInfo || ''} ${nomInfo || ''}`.trim();
+                    if (fullName) {
+                        names.push(fullName);
+                    }
+                }
+            });
+
+            if (names.length > 0) {
+                setImportedNames(names);
+            } else {
+                alert("Aucun nom trouvé dans le fichier. Assurez-vous d'avoir des colonnes 'Nom' et 'Prénom'.");
+            }
+        };
+        reader.readAsBinaryString(file);
+    };
+
 
     const importAndDistributePlayers = async () => {
-        if (!playersListText || !importGameId) return;
+        if (importedNames.length === 0 || !importGameId) return;
         setIsImporting(true);
         try {
-            // Parse players names
-            const names = playersListText.split('\n').map(n => n.trim()).filter(n => n.length > 0);
-            if (names.length === 0) throw new Error("No players found in text.");
+            const names = importedNames;
 
             // Get game brigades
             const gameBrigades = brigades.filter(b => b.game_id === importGameId);
@@ -266,7 +493,8 @@ export default function AdminDashboard() {
             const { error } = await supabase.from('players').insert(playersToInsert);
             if (error) throw error;
 
-            setPlayersListText("");
+            setImportedNames([]);
+            setImportFileName("");
             setIsPlayerImportOpen(false);
             fetchPlayers();
             alert(`Succès! ${playersToInsert.length} joueurs répartis dans ${gameBrigades.length} brigades.`);
@@ -275,6 +503,26 @@ export default function AdminDashboard() {
             alert("Erreur d'import : " + error.message);
         } finally {
             setIsImporting(false);
+        }
+    };
+
+    const deletePlayer = async (playerId: string) => {
+        if (!confirm("Voulez-vous vraiment supprimer ce joueur ?")) return;
+        try {
+            await supabase.from('players').delete().eq('id', playerId);
+            fetchPlayers();
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const deleteAllPlayers = async () => {
+        if (!confirm("Attention, cela supprimera TOUS les joueurs. Continuer ?")) return;
+        try {
+            await supabase.from('players').delete().neq('name', 'prevent_empty_filter_error_123');
+            fetchPlayers();
+        } catch (error) {
+            console.error(error);
         }
     };
 
@@ -353,77 +601,209 @@ export default function AdminDashboard() {
                                 <h2 className="text-2xl font-bold font-mono text-white">Instance Management</h2>
                                 <p className="text-muted-foreground text-sm">Create and manage game sessions.</p>
                             </div>
-                            <Dialog open={isGameDialogOpen} onOpenChange={setIsGameDialogOpen}>
-                                <DialogTrigger asChild>
-                                    <Button className="font-mono bg-primary hover:bg-primary/80 text-primary-foreground">
-                                        <Plus className="w-4 h-4 mr-2" /> NEW_GAME
-                                    </Button>
-                                </DialogTrigger>
-                                <DialogContent className="glass-panel border-white/10 bg-background/95 sm:max-w-[425px]">
-                                    <DialogHeader>
-                                        <DialogTitle className="font-mono text-xl">Initialize New Instance</DialogTitle>
-                                        <DialogDescription>Setup a new Game environment and automatically generate its Brigades.</DialogDescription>
-                                    </DialogHeader>
-                                    <div className="grid gap-4 py-4">
-                                        <div className="grid gap-2">
-                                            <Label className="font-mono text-muted-foreground">GAME_NAME</Label>
-                                            <Input
-                                                placeholder="e.g. Corporate Event 2026"
-                                                value={newGameName}
-                                                onChange={(e) => setNewGameName(e.target.value)}
-                                                className="bg-white/5 border-white/10 font-mono"
-                                            />
-                                        </div>
-                                        <div className="grid gap-2">
-                                            <Label className="font-mono text-muted-foreground">BRIGADE_COUNT</Label>
-                                            <Input
-                                                type="number"
-                                                value={newBrigadeCount}
-                                                onChange={(e) => setNewBrigadeCount(parseInt(e.target.value))}
-                                                className="bg-white/5 border-white/10 font-mono"
-                                            />
-                                        </div>
-                                        <div className="grid grid-cols-3 gap-2 mt-2">
-                                            <div className="grid gap-2">
-                                                <Label className="font-mono text-xs text-muted-foreground">ANNONCE (MIN)</Label>
-                                                <Input
-                                                    type="number"
-                                                    value={cycleSettings.annonce}
-                                                    onChange={(e) => setCycleSettings({ ...cycleSettings, annonce: parseInt(e.target.value) || 0 })}
-                                                    className="bg-white/5 border-white/10 font-mono text-xs"
-                                                />
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label className="font-mono text-xs text-muted-foreground">CONTESTS (MIN)</Label>
-                                                <Input
-                                                    type="number"
-                                                    value={cycleSettings.contests}
-                                                    onChange={(e) => setCycleSettings({ ...cycleSettings, contests: parseInt(e.target.value) || 0 })}
-                                                    className="bg-white/5 border-white/10 font-mono text-xs"
-                                                />
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label className="font-mono text-xs text-muted-foreground">TEMPS LIBRE (MIN)</Label>
-                                                <Input
-                                                    type="number"
-                                                    value={cycleSettings.temps_libre}
-                                                    onChange={(e) => setCycleSettings({ ...cycleSettings, temps_libre: parseInt(e.target.value) || 0 })}
-                                                    className="bg-white/5 border-white/10 font-mono text-xs"
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <DialogFooter>
-                                        <Button
-                                            onClick={deployInstance}
-                                            disabled={isDeploying || !newGameName}
-                                            className="font-mono bg-secondary hover:bg-secondary/80 text-secondary-foreground w-full"
-                                        >
-                                            {isDeploying ? "DEPLOYING..." : "DEPLOY_INSTANCE"}
+                            <div className="flex items-center gap-2">
+                                <Dialog open={isGameDialogOpen} onOpenChange={setIsGameDialogOpen}>
+                                    <DialogTrigger asChild>
+                                        <Button className="font-mono bg-primary hover:bg-primary/80 text-primary-foreground">
+                                            <Plus className="w-4 h-4 mr-2" /> NEW_GAME
                                         </Button>
-                                    </DialogFooter>
-                                </DialogContent>
-                            </Dialog>
+                                    </DialogTrigger>
+                                    <DialogContent className="glass-panel border-white/10 bg-background/95 sm:max-w-[425px]">
+                                        <DialogHeader>
+                                            <DialogTitle className="font-mono text-xl">Initialize New Instance</DialogTitle>
+                                            <DialogDescription>Setup a new Game environment and automatically generate its Brigades.</DialogDescription>
+                                        </DialogHeader>
+                                        <div className="grid gap-4 py-4">
+                                            <div className="grid gap-2">
+                                                <Label className="font-mono text-muted-foreground">GAME_NAME</Label>
+                                                <Input
+                                                    placeholder="e.g. Corporate Event 2026"
+                                                    value={newGameName}
+                                                    onChange={(e) => setNewGameName(e.target.value)}
+                                                    className="bg-white/5 border-white/10 font-mono"
+                                                />
+                                            </div>
+                                            <div className="grid gap-2">
+                                                <Label className="font-mono text-muted-foreground">BRIGADE_COUNT</Label>
+                                                <Input
+                                                    type="number"
+                                                    value={newBrigadeCount}
+                                                    onChange={(e) => setNewBrigadeCount(parseInt(e.target.value))}
+                                                    className="bg-white/5 border-white/10 font-mono"
+                                                />
+                                            </div>
+                                            <div className="grid grid-cols-3 gap-2 mt-2">
+                                                <div className="grid gap-2">
+                                                    <Label className="font-mono text-xs text-muted-foreground">ANNONCE (MIN)</Label>
+                                                    <Input
+                                                        type="number"
+                                                        value={cycleSettings.annonce}
+                                                        onChange={(e) => setCycleSettings({ ...cycleSettings, annonce: parseInt(e.target.value) || 0 })}
+                                                        className="bg-white/5 border-white/10 font-mono text-xs"
+                                                    />
+                                                </div>
+                                                <div className="grid gap-2">
+                                                    <Label className="font-mono text-xs text-muted-foreground">CONTESTS (MIN)</Label>
+                                                    <Input
+                                                        type="number"
+                                                        value={cycleSettings.contests}
+                                                        onChange={(e) => setCycleSettings({ ...cycleSettings, contests: parseInt(e.target.value) || 0 })}
+                                                        className="bg-white/5 border-white/10 font-mono text-xs"
+                                                    />
+                                                </div>
+                                                <div className="grid gap-2">
+                                                    <Label className="font-mono text-xs text-muted-foreground">TEMPS LIBRE (MIN)</Label>
+                                                    <Input
+                                                        type="number"
+                                                        value={cycleSettings.temps_libre}
+                                                        onChange={(e) => setCycleSettings({ ...cycleSettings, temps_libre: parseInt(e.target.value) || 0 })}
+                                                        className="bg-white/5 border-white/10 font-mono text-xs"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <DialogFooter>
+                                            <Button
+                                                onClick={deployInstance}
+                                                disabled={isDeploying || !newGameName}
+                                                className="font-mono bg-secondary hover:bg-secondary/80 text-secondary-foreground w-full"
+                                            >
+                                                {isDeploying ? "DEPLOYING..." : "DEPLOY_INSTANCE"}
+                                            </Button>
+                                        </DialogFooter>
+                                    </DialogContent>
+                                </Dialog>
+
+                                <Dialog open={isMassDeployOpen} onOpenChange={setIsMassDeployOpen}>
+                                    <DialogTrigger asChild>
+                                        <Button variant="outline" className="font-mono border-secondary text-secondary hover:bg-secondary/10 ml-2">
+                                            <Server className="w-4 h-4 mr-2" /> MASS_DEPLOY
+                                        </Button>
+                                    </DialogTrigger>
+                                    <DialogContent className="glass-panel border-white/10 bg-background/95 sm:max-w-[500px]">
+                                        <DialogHeader>
+                                            <DialogTitle className="font-mono text-xl">Mass Deploy Instances</DialogTitle>
+                                            <DialogDescription>
+                                                Créez plusieurs instances de jeu et répartissez intelligemment les joueurs selon leur poste.
+                                            </DialogDescription>
+                                        </DialogHeader>
+                                        <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
+                                            {/* Game config */}
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="grid gap-2">
+                                                    <Label className="font-mono text-muted-foreground">NAME_PREFIX</Label>
+                                                    <Input
+                                                        placeholder="e.g. Session"
+                                                        value={massDeployPrefix}
+                                                        onChange={(e) => setMassDeployPrefix(e.target.value)}
+                                                        className="bg-white/5 border-white/10 font-mono"
+                                                    />
+                                                </div>
+                                                <div className="grid gap-2">
+                                                    <Label className="font-mono text-muted-foreground">GAME_COUNT</Label>
+                                                    <Input
+                                                        type="number"
+                                                        value={massGameCount}
+                                                        onChange={(e) => setMassGameCount(parseInt(e.target.value))}
+                                                        className="bg-white/5 border-white/10 font-mono"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="grid gap-2">
+                                                <Label className="font-mono text-muted-foreground">BRIGADES_PER_GAME</Label>
+                                                <Input
+                                                    type="number"
+                                                    value={massBrigadeCount}
+                                                    onChange={(e) => setMassBrigadeCount(parseInt(e.target.value))}
+                                                    className="bg-white/5 border-white/10 font-mono"
+                                                />
+                                            </div>
+
+                                            {/* Players section */}
+                                            <div className="border border-white/10 rounded-md p-3 grid gap-3">
+                                                <div className="flex items-center justify-between">
+                                                    <Label className="font-mono text-muted-foreground text-sm">PLAYERS_TO_DISTRIBUTE ({massPlayers.length})</Label>
+                                                    {massPlayers.length > 0 && (
+                                                        <Button variant="ghost" size="sm" className="text-xs text-destructive h-6" onClick={() => setMassPlayers([])}>
+                                                            Vider la liste
+                                                        </Button>
+                                                    )}
+                                                </div>
+
+                                                {/* Excel import */}
+                                                <div className="grid gap-1">
+                                                    <Label className="font-mono text-xs text-muted-foreground">IMPORT_EXCEL (.xlsx — colonnes: Nom, Prénom, Poste)</Label>
+                                                    <Input
+                                                        type="file"
+                                                        accept=".xlsx,.xls"
+                                                        onChange={handleMassExcelUpload}
+                                                        className="bg-white/5 border-white/10 font-mono text-xs cursor-pointer"
+                                                    />
+                                                    {massExcelFileName && <p className="text-xs text-muted-foreground">{massExcelFileName}</p>}
+                                                </div>
+
+                                                {/* Manual input */}
+                                                <div className="grid gap-1">
+                                                    <Label className="font-mono text-xs text-muted-foreground">SAISIE_MANUELLE (Prénom Nom, Poste — 1 par ligne)</Label>
+                                                    <textarea
+                                                        className="flex min-h-[80px] w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary font-mono"
+                                                        placeholder={"Jean Dupont, Cuisinier\nMarie Martin, Serveur"}
+                                                        value={massManualText}
+                                                        onChange={(e) => setMassManualText(e.target.value)}
+                                                    />
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="font-mono text-xs border-white/10 mt-1"
+                                                        onClick={handleMassManualAdd}
+                                                        disabled={!massManualText.trim()}
+                                                    >
+                                                        + Ajouter à la liste
+                                                    </Button>
+                                                </div>
+
+                                                {/* Player preview */}
+                                                {massPlayers.length > 0 && (
+                                                    <div className="max-h-[120px] overflow-y-auto rounded border border-white/5 bg-white/5 p-2">
+                                                        {massPlayers.map((p, i) => (
+                                                            <div key={i} className="flex items-center justify-between text-xs font-mono py-0.5">
+                                                                <span>{p.name}</span>
+                                                                <span className="text-muted-foreground ml-2">{p.poste || '—'}</span>
+                                                                <button className="ml-2 text-destructive hover:opacity-80" onClick={() => setMassPlayers(prev => prev.filter((_, j) => j !== i))}>✕</button>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Cycle settings */}
+                                            <div className="grid grid-cols-3 gap-2">
+                                                <div className="grid gap-2">
+                                                    <Label className="font-mono text-xs text-muted-foreground">ANNONCE (MIN)</Label>
+                                                    <Input type="number" value={cycleSettings.annonce} onChange={(e) => setCycleSettings({ ...cycleSettings, annonce: parseInt(e.target.value) || 0 })} className="bg-white/5 border-white/10 font-mono text-xs" />
+                                                </div>
+                                                <div className="grid gap-2">
+                                                    <Label className="font-mono text-xs text-muted-foreground">CONTESTS (MIN)</Label>
+                                                    <Input type="number" value={cycleSettings.contests} onChange={(e) => setCycleSettings({ ...cycleSettings, contests: parseInt(e.target.value) || 0 })} className="bg-white/5 border-white/10 font-mono text-xs" />
+                                                </div>
+                                                <div className="grid gap-2">
+                                                    <Label className="font-mono text-xs text-muted-foreground">TEMPS LIBRE (MIN)</Label>
+                                                    <Input type="number" value={cycleSettings.temps_libre} onChange={(e) => setCycleSettings({ ...cycleSettings, temps_libre: parseInt(e.target.value) || 0 })} className="bg-white/5 border-white/10 font-mono text-xs" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <DialogFooter>
+                                            <Button
+                                                onClick={massDeployInstances}
+                                                disabled={isMassDeploying || !massDeployPrefix || massPlayers.length === 0}
+                                                className="font-mono bg-secondary hover:bg-secondary/80 text-secondary-foreground w-full"
+                                            >
+                                                {isMassDeploying ? "DEPLOYING..." : `DEPLOY_ALL (${massPlayers.length} joueurs)`}
+                                            </Button>
+                                        </DialogFooter>
+                                    </DialogContent>
+                                </Dialog>
+                            </div>
                         </div>
 
                         <Card className="glass-panel border-white/10 bg-background/50">
@@ -577,52 +957,61 @@ export default function AdminDashboard() {
                                 <h2 className="text-2xl font-bold font-mono text-white">Player Distribution</h2>
                                 <p className="text-muted-foreground text-sm">Import and distribute players into brigades with roles.</p>
                             </div>
-                            <Dialog open={isPlayerImportOpen} onOpenChange={setIsPlayerImportOpen}>
-                                <DialogTrigger asChild>
-                                    <Button className="font-mono bg-secondary hover:bg-secondary/80 text-secondary-foreground">
-                                        <Plus className="w-4 h-4 mr-2" /> IMPORT_PLAYERS
-                                    </Button>
-                                </DialogTrigger>
-                                <DialogContent className="glass-panel border-white/10 bg-background/95 sm:max-w-[425px]">
-                                    <DialogHeader>
-                                        <DialogTitle className="font-mono text-xl">Import & Distribute</DialogTitle>
-                                        <DialogDescription>Paste a list of names. They will be evenly distributed into the brigades of the selected game, and assigned unique rules within their brigade.</DialogDescription>
-                                    </DialogHeader>
-                                    <div className="grid gap-4 py-4">
-                                        <div className="grid gap-2">
-                                            <Label className="font-mono text-muted-foreground">TARGET_GAME</Label>
-                                            <select
-                                                className="flex h-10 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary font-mono"
-                                                value={importGameId}
-                                                onChange={(e) => setImportGameId(e.target.value)}
-                                            >
-                                                <option value="" disabled className="bg-background text-muted-foreground">Select a game...</option>
-                                                {games.map(g => (
-                                                    <option key={g.id} value={g.id} className="bg-background text-white">{g.name}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div className="grid gap-2">
-                                            <Label className="font-mono text-muted-foreground">NAMES_LIST (1 per line)</Label>
-                                            <textarea
-                                                className="flex min-h-[150px] w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary font-mono"
-                                                placeholder="John Doe&#10;Jane Smith&#10;Alice..."
-                                                value={playersListText}
-                                                onChange={(e) => setPlayersListText(e.target.value)}
-                                            />
-                                        </div>
-                                    </div>
-                                    <DialogFooter>
-                                        <Button
-                                            onClick={importAndDistributePlayers}
-                                            disabled={isImporting || !playersListText || !importGameId}
-                                            className="font-mono bg-secondary hover:bg-secondary/80 text-secondary-foreground w-full"
-                                        >
-                                            {isImporting ? "PROCESSING..." : "DISTRIBUTE_ROLES"}
+                            <div className="flex items-center gap-2">
+                                <Button variant="outline" className="font-mono border-destructive text-destructive hover:bg-destructive/10" onClick={deleteAllPlayers}>
+                                    <Trash2 className="w-4 h-4 mr-2" /> DELETE_ALL
+                                </Button>
+                                <Dialog open={isPlayerImportOpen} onOpenChange={setIsPlayerImportOpen}>
+                                    <DialogTrigger asChild>
+                                        <Button className="font-mono bg-secondary hover:bg-secondary/80 text-secondary-foreground">
+                                            <Plus className="w-4 h-4 mr-2" /> IMPORT_PLAYERS
                                         </Button>
-                                    </DialogFooter>
-                                </DialogContent>
-                            </Dialog>
+                                    </DialogTrigger>
+                                    <DialogContent className="glass-panel border-white/10 bg-background/95 sm:max-w-[425px]">
+                                        <DialogHeader>
+                                            <DialogTitle className="font-mono text-xl">Import & Distribute</DialogTitle>
+                                            <DialogDescription>Paste a list of names. They will be evenly distributed into the brigades of the selected game, and assigned unique rules within their brigade.</DialogDescription>
+                                        </DialogHeader>
+                                        <div className="grid gap-4 py-4">
+                                            <div className="grid gap-2">
+                                                <Label className="font-mono text-muted-foreground">TARGET_GAME</Label>
+                                                <select
+                                                    className="flex h-10 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary font-mono"
+                                                    value={importGameId}
+                                                    onChange={(e) => setImportGameId(e.target.value)}
+                                                >
+                                                    <option value="" disabled className="bg-background text-muted-foreground">Select a game...</option>
+                                                    {games.map(g => (
+                                                        <option key={g.id} value={g.id} className="bg-background text-white">{g.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div className="grid gap-2">
+                                                <Label className="font-mono text-muted-foreground">FICHIER EXCEL (.xlsx)</Label>
+                                                <div className="flex items-center gap-2">
+                                                    <Input
+                                                        type="file"
+                                                        accept=".xlsx, .xls"
+                                                        onChange={handleFileUpload}
+                                                        className="bg-white/5 border-white/10 font-mono text-xs cursor-pointer"
+                                                    />
+                                                </div>
+                                                {importFileName && <p className="text-xs text-muted-foreground mt-1">Fichier sélectionné : {importFileName} ({importedNames.length} joueurs trouvés)</p>}
+                                                <p className="text-xs text-muted-foreground mt-1 text-primary">Le fichier doit contenir les colonnes 'Nom' et 'Prénom'.</p>
+                                            </div>
+                                        </div>
+                                        <DialogFooter>
+                                            <Button
+                                                onClick={importAndDistributePlayers}
+                                                disabled={isImporting || importedNames.length === 0 || !importGameId}
+                                                className="font-mono bg-secondary hover:bg-secondary/80 text-secondary-foreground w-full"
+                                            >
+                                                {isImporting ? "PROCESSING..." : "DISTRIBUTE_ROLES"}
+                                            </Button>
+                                        </DialogFooter>
+                                    </DialogContent>
+                                </Dialog>
+                            </div>
                         </div>
 
                         <Card className="glass-panel border-white/10 bg-background/50">
@@ -634,6 +1023,7 @@ export default function AdminDashboard() {
                                             <TableHead className="font-mono text-primary">BRIGADE CODE</TableHead>
                                             <TableHead className="font-mono text-primary">ROLE</TableHead>
                                             <TableHead className="font-mono text-primary">GAME</TableHead>
+                                            <TableHead className="text-right font-mono text-primary">ACTIONS</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
@@ -648,12 +1038,15 @@ export default function AdminDashboard() {
                                                     <TableCell className="font-mono text-secondary">{brigadeCode}</TableCell>
                                                     <TableCell className="font-mono text-xs text-muted-foreground">{p.role || "No Role"}</TableCell>
                                                     <TableCell className="font-mono text-xs text-muted-foreground">{gameName}</TableCell>
+                                                    <TableCell className="text-right">
+                                                        <Button variant="ghost" size="icon" title="Supprimer" onClick={() => deletePlayer(p.id)} className="h-8 w-8 hover:text-destructive"><Trash2 className="w-4 h-4" /></Button>
+                                                    </TableCell>
                                                 </TableRow>
                                             )
                                         })}
                                         {players.length === 0 && (
                                             <TableRow>
-                                                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground font-mono">NO PLAYERS FOUND</TableCell>
+                                                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground font-mono">NO PLAYERS FOUND</TableCell>
                                             </TableRow>
                                         )}
                                     </TableBody>

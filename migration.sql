@@ -111,29 +111,9 @@ CREATE TABLE IF NOT EXISTS public.game_logs (
 ALTER TABLE public.catalog_recipe ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.catalog_fragments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.game_logs ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Allow public read/write access" ON public.catalog_recipe;
 CREATE POLICY "Allow public read/write access" ON public.catalog_recipe FOR ALL USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Allow public read/write access" ON public.catalog_fragments;
 CREATE POLICY "Allow public read/write access" ON public.catalog_fragments FOR ALL USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Allow public read/write access" ON public.game_logs;
 CREATE POLICY "Allow public read/write access" ON public.game_logs FOR ALL USING (true) WITH CHECK (true);
-
-DO $$
-BEGIN
-    BEGIN
-        ALTER PUBLICATION supabase_realtime ADD TABLE public.catalog_recipe;
-    EXCEPTION WHEN undefined_object OR duplicate_object THEN
-    END;
-    
-    BEGIN
-        ALTER PUBLICATION supabase_realtime ADD TABLE public.catalog_fragments;
-    EXCEPTION WHEN undefined_object OR duplicate_object THEN
-    END;
-    
-    BEGIN
-        ALTER PUBLICATION supabase_realtime ADD TABLE public.game_logs;
-    EXCEPTION WHEN undefined_object OR duplicate_object THEN
-    END;
-END $$;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.catalog_recipe;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.catalog_fragments;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.game_logs;

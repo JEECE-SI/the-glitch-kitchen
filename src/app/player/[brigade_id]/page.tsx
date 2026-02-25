@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
-import { Lock, FileText, Database, Shield, Zap, Terminal, Activity, ListOrdered, Users } from "lucide-react";
+import { Lock, FileText, Database, Shield, Zap, Terminal, Activity, ListOrdered, Users, FlaskConical, Loader2, Star, CheckCircle2, XCircle, ChevronDown, ChevronUp, Trophy, RotateCcw } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 
@@ -35,29 +35,161 @@ export default function PlayerDashboard() {
     const [decryptInput, setDecryptInput] = useState("");
     const [isDecrypting, setIsDecrypting] = useState(false);
     const [selectedFragment, setSelectedFragment] = useState<any | null>(null);
+    const [brigadeRankings, setBrigadeRankings] = useState<{ name: string; code: string; best_score: number; attempt: number }[]>([]);
+
+    // Recipe testing state
+    const [isTesting, setIsTesting] = useState(false);
+    const [testAttempts, setTestAttempts] = useState(0);
+    const [previousTests, setPreviousTests] = useState<any[]>([]);
+    const [selectedTestResult, setSelectedTestResult] = useState<any | null>(null);
+    const [showTestDetails, setShowTestDetails] = useState(false);
+    const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    // Ref so saveStepToDb always has the latest brigadeDbId even inside debounce callbacks
+    const brigadeDbIdRef = useRef<string>("");
+    // Stable ref to all brigades list — used by realtime ranking refresh
+    const allBrigadesRef = useRef<{ id: string; name: string; code: string }[]>([]);
+
+    const refreshRankings = useCallback(async () => {
+        const brigades = allBrigadesRef.current;
+        if (!brigades || brigades.length === 0) return;
+        try {
+            const { data: allTests } = await supabase
+                .from('recipe_tests')
+                .select('brigade_id, global_score, attempt_number')
+                .in('brigade_id', brigades.map((b) => b.id));
+            if (!allTests) return;
+            const rankMap: Record<string, { best_score: number; attempt: number }> = {};
+            for (const t of allTests) {
+                if (!rankMap[t.brigade_id] || t.global_score > rankMap[t.brigade_id].best_score) {
+                    rankMap[t.brigade_id] = { best_score: t.global_score, attempt: t.attempt_number };
+                }
+            }
+            const rankings = brigades.map((b) => ({
+                name: b.name,
+                code: b.code,
+                best_score: rankMap[b.id]?.best_score ?? -1,
+                attempt: rankMap[b.id]?.attempt ?? 0,
+            })).sort((a, b) => b.best_score - a.best_score);
+            setBrigadeRankings(rankings);
+        } catch (e) {
+            console.warn('[refreshRankings] error:', e);
+        }
+    }, []);
 
     useEffect(() => {
         const fetchInitialData = async () => {
-            const { data: brigadeData } = await supabase.from('brigades').select('*').eq('code', brigadeId).single();
-            if (brigadeData) {
-                setGameId(brigadeData.game_id);
-                setBrigadeName(brigadeData.name);
-                setBrigadeDbId(brigadeData.id);
+            // Plain array query — avoids PostgREST 406 from single()/maybeSingle()
+            const { data: brigadeRows, error: brigadeError } = await supabase
+                .from('brigades')
+                .select('*')
+                .eq('id', brigadeId)
+                .limit(1);
 
-                const { data: gData } = await supabase.from('games').select('*').eq('id', brigadeData.game_id).single();
-                if (gData) setGameState(gData);
+            if (brigadeError) {
+                console.error('[PlayerDashboard] Brigade fetch error:', brigadeError);
+            }
 
-                const { data: playersData } = await supabase.from('players').select('*').eq('brigade_id', brigadeData.id);
-                if (playersData) setPlayers(playersData);
+            const brigadeData = brigadeRows?.[0] ?? null;
 
-                const { data: logsData } = await supabase.from('game_logs').select('*').eq('game_id', brigadeData.game_id).order('created_at', { ascending: false });
-                if (logsData) setGameLogs(logsData);
+            if (!brigadeData) {
+                console.warn('[PlayerDashboard] No brigade found for code:', brigadeId);
+                return;
+            }
 
-                const { data: staffData } = await supabase.from('staff').select('code').eq('game_id', brigadeData.game_id).single();
-                if (staffData) setStaffCode(staffData.code);
+            setGameId(brigadeData.game_id);
+            setBrigadeName(brigadeData.name);
+            setBrigadeDbId(brigadeData.id);
+            brigadeDbIdRef.current = brigadeData.id;
 
-                const { data: invData } = await supabase.from('inventory').select('*').eq('brigade_id', brigadeData.id).order('slot_index', { ascending: true });
-                if (invData) setInventory(invData);
+            const { data: gRows } = await supabase.from('games').select('*').eq('id', brigadeData.game_id).limit(1);
+            if (gRows?.[0]) setGameState(gRows[0]);
+
+            const { data: playersData } = await supabase.from('players').select('*').eq('brigade_id', brigadeData.id);
+            if (playersData) setPlayers(playersData);
+
+            const { data: logsData } = await supabase.from('game_logs').select('*').eq('game_id', brigadeData.game_id).order('created_at', { ascending: false });
+            if (logsData) setGameLogs(logsData);
+
+            const { data: staffRows } = await supabase.from('staff').select('code').eq('game_id', brigadeData.game_id).limit(1);
+            if (staffRows?.[0]) setStaffCode(staffRows[0].code);
+
+            const { data: invData } = await supabase.from('inventory').select('*').eq('brigade_id', brigadeData.id).order('slot_index', { ascending: true });
+            if (invData && invData.length > 0) {
+                setInventory(invData);
+            } else {
+                // Initialize inventory if missing
+                const newInv = Array.from({ length: 15 }, (_, i) => ({
+                    brigade_id: brigadeData.id,
+                    slot_index: i + 1,
+                    fragment_data: null
+                }));
+                const { data: insertedSlots } = await supabase.from('inventory').insert(newInv).select();
+                if (insertedSlots) {
+                    setInventory(insertedSlots);
+                } else {
+                    // Fallback, though lack of ID will cause issues
+                    setInventory(newInv as any);
+                }
+            }
+
+            // Load persisted recipe notes
+            const { data: notesData } = await supabase.from('recipe_notes').select('*').eq('brigade_id', brigadeData.id).order('step_index', { ascending: true });
+            if (notesData && notesData.length > 0) {
+                const loadedSteps = Array.from({ length: 10 }, (_, i) => {
+                    const note = notesData.find((n: any) => n.step_index === i + 1);
+                    return {
+                        fragments: note?.fragments || "",
+                        ingredient: note?.ingredient || "",
+                        technique: note?.technique || "",
+                        tool: note?.tool || "",
+                        notes: note?.notes || "",
+                    };
+                });
+                setRecipeSteps(loadedSteps);
+            } else {
+                // Initialize notes if missing
+                const newNotes = Array.from({ length: 10 }, (_, i) => ({
+                    brigade_id: brigadeData.id,
+                    step_index: i + 1,
+                    fragments: "",
+                    ingredient: "",
+                    technique: "",
+                    tool: "",
+                    notes: ""
+                }));
+                await supabase.from('recipe_notes').insert(newNotes);
+            }
+
+            // Load previous test attempts (graceful - table may not exist yet)
+            try {
+                const { data: testsData, error: testsError } = await supabase
+                    .from('recipe_tests')
+                    .select('*')
+                    .eq('brigade_id', brigadeData.id)
+                    .order('attempt_number', { ascending: true });
+                if (testsError) {
+                    console.warn('[PlayerDashboard] recipe_tests fetch error (table may not exist yet):', testsError.message);
+                } else if (testsData) {
+                    setPreviousTests(testsData);
+                    setTestAttempts(testsData.length);
+                }
+            } catch (e) {
+                console.warn('[PlayerDashboard] Could not load recipe_tests:', e);
+            }
+
+            // Load brigade rankings (all brigades' best recipe test scores)
+            try {
+                const { data: allBrigades } = await supabase
+                    .from('brigades')
+                    .select('id, name, code')
+                    .eq('game_id', brigadeData.game_id);
+
+                if (allBrigades && allBrigades.length > 0) {
+                    allBrigadesRef.current = allBrigades;
+                    await refreshRankings();
+                }
+            } catch (e) {
+                console.warn('[PlayerDashboard] Could not load brigade rankings:', e);
             }
         };
         fetchInitialData();
@@ -84,6 +216,26 @@ export default function PlayerDashboard() {
             supabase.removeChannel(invSub);
         };
     }, [gameId, brigadeDbId]);
+
+    // Dedicated effect for rankings realtime to ensure no early returns block it
+    useEffect(() => {
+        if (!gameId) return;
+
+        console.log('[Realtime] Subscribing to recipe_tests rankings...');
+        const rankSub = supabase
+            .channel('public:recipe_tests:rankings')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'recipe_tests' }, (payload) => {
+                console.log('[Realtime] Received recipe_tests event:', payload.eventType);
+                refreshRankings();
+            })
+            .subscribe((status) => {
+                console.log('[Realtime] recipe_tests channel status:', status);
+            });
+
+        return () => {
+            supabase.removeChannel(rankSub);
+        };
+    }, [gameId, refreshRankings]);
 
     useEffect(() => {
         if (!gameState) return;
@@ -209,10 +361,145 @@ export default function PlayerDashboard() {
         Array.from({ length: 10 }, () => ({ fragments: "", ingredient: "", technique: "", tool: "", notes: "" }))
     );
 
+    // Auto-save a single step's recipe notes to Supabase
+    const saveStepToDb = useCallback(async (stepIndex: number, step: typeof recipeSteps[0]) => {
+        const id = brigadeDbIdRef.current;
+        if (!id) {
+            console.warn('[saveStepToDb] brigadeDbId not ready yet, skipping save');
+            return;
+        }
+        const { error } = await supabase.from('recipe_notes').upsert({
+            brigade_id: id,
+            step_index: stepIndex + 1,
+            fragments: step.fragments,
+            ingredient: step.ingredient,
+            technique: step.technique,
+            tool: step.tool,
+            notes: step.notes,
+        }, { onConflict: 'brigade_id,step_index' });
+        if (error) {
+            console.error('[saveStepToDb] upsert error:', error);
+        } else {
+            console.log('[saveStepToDb] step', stepIndex + 1, 'saved ok');
+        }
+    }, []);
+
+    // Also expose a full-save for the test-recipe path
+    const saveRecipeToDb = useCallback(async (steps: typeof recipeSteps) => {
+        if (!brigadeDbId) return;
+        for (let i = 0; i < steps.length; i++) {
+            await saveStepToDb(i, steps[i]);
+        }
+    }, [brigadeDbId, saveStepToDb]);
+
     const updateRecipeStep = (index: number, field: keyof typeof recipeSteps[0], value: string) => {
         const newSteps = [...recipeSteps];
         newSteps[index] = { ...newSteps[index], [field]: value };
         setRecipeSteps(newSteps);
+
+        // Debounced save — only the modified step
+        if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = setTimeout(() => {
+            saveStepToDb(index, newSteps[index]);
+        }, 1000);
+    };
+
+    // Handle recipe test via AI
+    const handleTestRecipe = async () => {
+        if (isTesting || testAttempts >= 3) return;
+        if (!brigadeDbId) {
+            alert('Erreur : Brigade non identifiée. Rechargez la page.');
+            return;
+        }
+        setIsTesting(true);
+        // 70s client-side timeout — the route allows 60s + a little margin
+        const abortController = new AbortController();
+        const timeoutId = setTimeout(() => abortController.abort(), 70_000);
+        try {
+            // Save current recipe first
+            await saveRecipeToDb(recipeSteps);
+
+            const res = await fetch('/api/test-recipe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    brigadeId,
+                    brigadeDbId,
+                    recipeSteps,
+                }),
+                signal: abortController.signal,
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                alert(data.error || 'Erreur lors du test.');
+                return;
+            }
+
+            // Update state
+            setTestAttempts(data.attempt_number);
+            const newTest = {
+                attempt_number: data.attempt_number,
+                global_score: data.global_score,
+                details: JSON.stringify(data),
+                created_at: new Date().toISOString(),
+            };
+            setPreviousTests(prev => [...prev, newTest]);
+            setSelectedTestResult(data);
+            setShowTestDetails(true);
+            refreshRankings();
+        } catch (error: any) {
+            console.error(error);
+            if (error.name === 'AbortError') {
+                alert("Délai d'analyse dépassé (> 70s). Veuillez réessayer.");
+            } else {
+                alert('Erreur réseau: ' + error.message);
+            }
+        } finally {
+            clearTimeout(timeoutId);
+            setIsTesting(false);
+        }
+    };
+
+    // Reset all test attempts for this brigade (dev/admin helper)
+    const handleResetTests = async () => {
+        if (!brigadeDbId) return;
+        if (!confirm('Réinitialiser les 3 essais de cette brigade ?')) return;
+        const { error } = await supabase
+            .from('recipe_tests')
+            .delete()
+            .eq('brigade_id', brigadeDbId);
+        if (error) {
+            alert('Erreur lors de la réinitialisation : ' + error.message);
+        } else {
+            setPreviousTests([]);
+            setTestAttempts(0);
+            setShowTestDetails(false);
+            setSelectedTestResult(null);
+            refreshRankings();
+        }
+    };
+
+    const getScoreColor = (score: number) => {
+        if (score >= 80) return 'text-green-400';
+        if (score >= 50) return 'text-yellow-400';
+        if (score >= 25) return 'text-orange-400';
+        return 'text-red-400';
+    };
+
+    const getScoreBg = (score: number) => {
+        if (score >= 80) return 'bg-green-500/20 border-green-500/50';
+        if (score >= 50) return 'bg-yellow-500/20 border-yellow-500/50';
+        if (score >= 25) return 'bg-orange-500/20 border-orange-500/50';
+        return 'bg-red-500/20 border-red-500/50';
+    };
+
+    const getScoreRingColor = (score: number) => {
+        if (score >= 80) return '#22c55e';
+        if (score >= 50) return '#eab308';
+        if (score >= 25) return '#f97316';
+        return '#ef4444';
     };
 
     return (
@@ -305,7 +592,8 @@ export default function PlayerDashboard() {
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <Card className="glass-panel border-white/10 bg-background/50 h-[400px] flex flex-col lg:col-span-2">
+                            {/* Logs - left */}
+                            <Card className="glass-panel border-white/10 bg-background/50 h-[400px] flex flex-col">
                                 <CardHeader className="border-b border-white/5 pb-4">
                                     <CardTitle className="font-mono text-lg flex items-center gap-2">
                                         <Terminal className="w-5 h-5 text-secondary" />
@@ -330,50 +618,139 @@ export default function PlayerDashboard() {
                                 </CardContent>
                             </Card>
 
+                            {/* Brigade Rankings - right */}
                             <Card className="glass-panel border-white/10 bg-background/50 h-[400px] flex flex-col">
                                 <CardHeader className="border-b border-white/5 pb-4">
-                                    <CardTitle className="font-mono text-lg flex items-center gap-2 text-primary">
-                                        <Shield className="w-5 h-5" />
-                                        BRIGADE_STATUS
+                                    <CardTitle className="font-mono text-lg flex items-center gap-2 text-yellow-400">
+                                        <Trophy className="w-5 h-5" />
+                                        RECIPE_LEADERBOARD
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="flex-1 overflow-auto p-4">
-                                    <div className="flex flex-col gap-4 font-mono text-sm">
-                                        <div className="flex items-center justify-between p-3 rounded bg-white/5 border border-white/5">
-                                            <span className="text-muted-foreground">NETWORK_LINK</span>
-                                            <span className="text-green-400">SECURE</span>
+                                    {brigadeRankings.length === 0 ? (
+                                        <div className="flex flex-col items-center justify-center h-full gap-3 opacity-40">
+                                            <Trophy className="w-10 h-10 text-yellow-400" />
+                                            <p className="font-mono text-xs text-muted-foreground text-center">NO_SCORES_YET<br /><span className="text-[10px]">Aucune brigade n&apos;a soumis de recette</span></p>
                                         </div>
-                                        <div className="flex items-center justify-between p-3 rounded bg-white/5 border border-white/5">
-                                            <span className="text-muted-foreground">DB_ENCRYPTION</span>
-                                            <span className="text-green-400">ACTIVE</span>
+                                    ) : (
+                                        <div className="space-y-2 font-mono">
+                                            {brigadeRankings.map((b, idx) => {
+                                                const isMe = b.code === brigadeId;
+                                                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
+                                                const scoreColor = b.best_score < 0 ? 'text-white/20' :
+                                                    b.best_score >= 80 ? 'text-green-400' :
+                                                        b.best_score >= 50 ? 'text-yellow-400' :
+                                                            b.best_score >= 25 ? 'text-orange-400' : 'text-red-400';
+                                                const scoreBg = b.best_score < 0 ? 'bg-white/5 border-white/10' :
+                                                    b.best_score >= 80 ? 'bg-green-500/10 border-green-500/30' :
+                                                        b.best_score >= 50 ? 'bg-yellow-500/10 border-yellow-500/30' :
+                                                            b.best_score >= 25 ? 'bg-orange-500/10 border-orange-500/30' : 'bg-red-500/10 border-red-500/30';
+                                                return (
+                                                    <div key={b.code} className={`flex items-center justify-between px-3 py-2.5 rounded-lg border transition-all ${scoreBg} ${isMe ? 'ring-1 ring-primary/50' : ''}`}>
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            <span className="text-base w-7 shrink-0 text-center">{medal}</span>
+                                                            <div className="min-w-0">
+                                                                <p className={`text-xs font-bold truncate ${isMe ? 'text-primary' : 'text-white'}`}>{b.name}</p>
+                                                                {isMe && <span className="text-[9px] text-primary/70 uppercase">← vous</span>}
+                                                            </div>
+                                                        </div>
+                                                        <div className="shrink-0 text-right">
+                                                            {b.best_score < 0 ? (
+                                                                <span className="text-xs text-white/20">—</span>
+                                                            ) : (
+                                                                <>
+                                                                    <span className={`text-lg font-black ${scoreColor}`}>{b.best_score}<span className="text-xs font-normal">%</span></span>
+                                                                    <p className="text-[9px] text-white/30">essai {b.attempt}</p>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
-                                        <div className="flex items-center justify-between p-3 rounded bg-white/5 border border-white/5">
-                                            <span className="text-muted-foreground">SYSTEM_INTEGRITY</span>
-                                            <span className="text-primary">99.9%</span>
-                                        </div>
-                                        <div className="flex items-center justify-between p-3 rounded bg-white/5 border border-white/5">
-                                            <span className="text-muted-foreground">ROLE_ASSIGNMENT</span>
-                                            <Badge variant="outline" className="text-primary border-primary">PENDING...</Badge>
-                                        </div>
-                                    </div>
+                                    )}
                                 </CardContent>
                             </Card>
                         </div>
                     </TabsContent>
 
                     <TabsContent value="recipe" className="space-y-4">
-                        <div className="flex justify-between items-center mb-4 border-b border-white/10 pb-4">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 border-b border-white/10 pb-4 gap-4">
                             <div>
                                 <h2 className="text-xl font-bold font-mono text-white flex items-center gap-2">
                                     <ListOrdered className="w-5 h-5 text-green-500" />
                                     RECIPE_ASSEMBLY_LAB
                                 </h2>
-                                <p className="text-xs text-muted-foreground font-mono mt-1">Drag and drop fragments to assign them to recipe steps.</p>
+                                <p className="text-xs text-muted-foreground font-mono mt-1">Drag and drop fragments to assign them to recipe steps. Auto-saved.</p>
                             </div>
-                            <Button variant="outline" size="sm" className="font-mono text-xs h-8" disabled>
-                                SUBMIT_FINAL_RECIPE
-                            </Button>
+                            <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-1.5">
+                                    {[1, 2, 3].map(i => (
+                                        <div key={i} className={`w-3 h-3 rounded-full border ${i <= testAttempts ? 'bg-primary border-primary' : 'border-white/20 bg-transparent'}`} title={`Essai ${i}`} />
+                                    ))}
+                                    <span className="text-[10px] text-muted-foreground font-mono ml-1">{testAttempts}/3</span>
+                                </div>
+                                <Button
+                                    onClick={handleTestRecipe}
+                                    disabled={isTesting || testAttempts >= 3}
+                                    className={`font-mono text-xs h-9 gap-2 ${testAttempts >= 3 ? 'bg-white/10 text-muted-foreground' : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white shadow-lg shadow-purple-500/20'}`}
+                                    size="sm"
+                                >
+                                    {isTesting ? (
+                                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> ANALYSE_SYSTEME...</>
+                                    ) : testAttempts >= 3 ? (
+                                        <><XCircle className="w-3.5 h-3.5" /> MAX_REACHED</>
+                                    ) : (
+                                        <><FlaskConical className="w-3.5 h-3.5" /> TEST_RECIPE</>
+                                    )}
+                                </Button>
+                                {testAttempts > 0 && (
+                                    <Button
+                                        onClick={handleResetTests}
+                                        variant="ghost"
+                                        size="sm"
+                                        className="font-mono text-xs h-9 gap-1.5 text-red-400/60 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20"
+                                        title="Réinitialiser les essais"
+                                    >
+                                        <RotateCcw className="w-3 h-3" />
+                                        RESET
+                                    </Button>
+                                )}
+                            </div>
                         </div>
+
+                        {/* Previous test results summary */}
+                        {previousTests.length > 0 && (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-2">
+                                {previousTests.map((test, idx) => {
+                                    const details = typeof test.details === 'string' ? JSON.parse(test.details) : test.details;
+                                    const score = details?.global_score || test.global_score || 0;
+                                    return (
+                                        <button
+                                            key={idx}
+                                            onClick={() => {
+                                                setSelectedTestResult(details);
+                                                setShowTestDetails(true);
+                                            }}
+                                            className={`relative overflow-hidden p-4 rounded-xl border transition-all hover:scale-[1.02] cursor-pointer ${getScoreBg(score)}`}
+                                        >
+                                            <div className="absolute top-0 right-0 w-20 h-20 rounded-bl-full opacity-20" style={{ background: getScoreRingColor(score) }} />
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex flex-col items-start">
+                                                    <span className="text-[10px] font-mono text-muted-foreground uppercase">Essai {test.attempt_number || idx + 1}</span>
+                                                    <span className="text-xs font-mono text-white/60 mt-0.5">
+                                                        {test.created_at ? new Date(test.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`text-3xl font-black font-mono ${getScoreColor(score)}`}>{score}<span className="text-lg">%</span></span>
+                                                </div>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
 
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
                             {/* Left Panel: Inventory (1/3) */}
@@ -511,6 +888,77 @@ export default function PlayerDashboard() {
                                 </CardContent>
                             </Card>
                         </div>
+
+                        {/* Test Results Detail Modal */}
+                        {showTestDetails && selectedTestResult && (
+                            <Card className="glass-panel border-purple-500/30 bg-background/95 mt-4 overflow-hidden">
+                                <CardHeader className="border-b border-purple-500/20 bg-gradient-to-r from-purple-500/10 to-blue-500/10 py-4">
+                                    <div className="flex items-center justify-between">
+                                        <CardTitle className="font-mono text-base flex items-center gap-2 text-purple-400">
+                                            <Trophy className="w-5 h-5" />
+                                            RÉSULTAT_SYSTEME
+                                        </CardTitle>
+                                        <Button variant="ghost" size="sm" className="font-mono text-xs h-7" onClick={() => setShowTestDetails(false)}>
+                                            FERMER
+                                        </Button>
+                                    </div>
+                                </CardHeader>
+                                <CardContent className="p-6">
+                                    {/* Global score hero */}
+                                    <div className="flex flex-col items-center mb-8">
+                                        <div className="relative w-32 h-32 flex items-center justify-center mb-4">
+                                            <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 100 100">
+                                                <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="8" />
+                                                <circle
+                                                    cx="50" cy="50" r="42" fill="none"
+                                                    stroke={getScoreRingColor(selectedTestResult.global_score)}
+                                                    strokeWidth="8"
+                                                    strokeDasharray={`${(selectedTestResult.global_score / 100) * 264} 264`}
+                                                    strokeLinecap="round"
+                                                    className="transition-all duration-1000 ease-out"
+                                                />
+                                            </svg>
+                                            <span className={`text-4xl font-black font-mono ${getScoreColor(selectedTestResult.global_score)}`}>
+                                                {selectedTestResult.global_score}<span className="text-2xl">%</span>
+                                            </span>
+                                        </div>
+                                        <p className="text-sm text-white/70 text-center max-w-md font-sans">
+                                            {selectedTestResult.global_feedback}
+                                        </p>
+                                    </div>
+
+                                    {/* Per-step breakdown */}
+                                    <div className="space-y-2">
+                                        <h4 className="font-mono text-xs text-muted-foreground uppercase mb-3">Détail par étape</h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            {selectedTestResult.steps?.map((step: any) => (
+                                                <div key={step.step} className={`p-3 rounded-lg border ${getScoreBg(step.step_score)}`}>
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="font-mono text-xs text-white font-bold">STEP_{String(step.step).padStart(2, '0')}</span>
+                                                        <span className={`font-mono text-lg font-black ${getScoreColor(step.step_score)}`}>{step.step_score}%</span>
+                                                    </div>
+                                                    <div className="grid grid-cols-3 gap-2 mb-2">
+                                                        <div className="text-center">
+                                                            <div className="text-[9px] font-mono text-muted-foreground uppercase">Ingr.</div>
+                                                            <div className={`text-sm font-bold font-mono ${getScoreColor(step.ingredient_score)}`}>{step.ingredient_score}%</div>
+                                                        </div>
+                                                        <div className="text-center">
+                                                            <div className="text-[9px] font-mono text-muted-foreground uppercase">Tech.</div>
+                                                            <div className={`text-sm font-bold font-mono ${getScoreColor(step.technique_score)}`}>{step.technique_score}%</div>
+                                                        </div>
+                                                        <div className="text-center">
+                                                            <div className="text-[9px] font-mono text-muted-foreground uppercase">Outil</div>
+                                                            <div className={`text-sm font-bold font-mono ${getScoreColor(step.tool_score)}`}>{step.tool_score}%</div>
+                                                        </div>
+                                                    </div>
+                                                    <p className="text-[10px] text-white/60 font-sans italic">{step.feedback}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
                     </TabsContent>
 
                     <TabsContent value="contests">
