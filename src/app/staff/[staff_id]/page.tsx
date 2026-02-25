@@ -195,6 +195,10 @@ export default function StaffDashboard() {
 
     if (!game) return <div className="p-8 text-white font-mono flex items-center gap-4"><Activity className="animate-spin" /> ACCÈS STAFF EN COURS...</div>;
 
+    const cycleMins = (game?.settings?.annonce || 4) + (game?.settings?.contests || 7) + (game?.settings?.temps_libre || 9);
+    const totalMins = cycleMins * 4;
+    const globalProgressPercent = Math.min(100, (globalTimer / (totalMins * 60)) * 100);
+
     return (
         <div className="min-h-screen flex flex-col p-4 md:p-8 bg-background relative overflow-hidden">
             {/* Background design */}
@@ -240,95 +244,133 @@ export default function StaffDashboard() {
                             </Button>
                         </Card>
                     ) : (
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            {/* TIMER & MAIN CONTROLS */}
-                            <Card className="glass-panel border-white/10 bg-background/50 lg:col-span-2">
+                        <div className="space-y-6">
+                            {/* GLOBAL TIMELINE OVERVIEW */}
+                            <Card className="glass-panel border-white/10 bg-background/50">
                                 <CardHeader className="border-b border-white/5 pb-4">
-                                    <CardTitle className="font-mono flex items-center gap-2 text-xl">
-                                        <Timer className="w-6 h-6 text-blue-400" />
-                                        CYCLE {currentCycle} OF 4
-                                    </CardTitle>
-                                    <CardDescription className="font-mono text-xs text-muted-foreground uppercase">
-                                        {currentPhase !== 'setup' ? PHASE_CONFIG[currentPhase as keyof typeof PHASE_CONFIG]?.title : "EN ATTENTE"}
-                                    </CardDescription>
-                                </CardHeader>
-                                <CardContent className="p-8 flex flex-col items-center justify-center">
-                                    <div className={`text-7xl md:text-9xl font-black font-mono tracking-tighter transition-colors ${timeLeft <= 60 && timerActive && timeLeft > 0 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
-                                        {formatTime(timeLeft)}
+                                    <div className="flex justify-between items-center">
+                                        <CardTitle className="font-mono flex items-center gap-2 text-xl">
+                                            <Activity className="w-5 h-5 text-blue-400" />
+                                            GLOBAL_TIMELINE
+                                        </CardTitle>
+                                        <div className="font-mono text-xl font-bold flex items-baseline gap-2">
+                                            <span className="text-white">{formatTime(globalTimer)}</span>
+                                            <span className="text-muted-foreground text-sm">/ {totalMins}:00</span>
+                                        </div>
                                     </div>
-                                    <div className="flex gap-4 mt-8">
-                                        <Button size="lg" onClick={toggleTimer} className="font-mono bg-white/10 hover:bg-white/20 border border-white/20 h-16 w-16 p-0 rounded-full flex items-center justify-center" disabled={currentPhase === 'setup'}>
-                                            {timerActive ? <Pause className="w-8 h-8" /> : <Play className="w-8 h-8 ml-1" />}
-                                        </Button>
-                                        <Button size="lg" onClick={() => adjustTime(60)} variant="outline" className="font-mono h-16 px-6 border-white/20">+1 MIN</Button>
-                                        <Button size="lg" onClick={() => adjustTime(-60)} variant="outline" className="font-mono h-16 px-6 border-white/20">-1 MIN</Button>
+                                </CardHeader>
+                                <CardContent className="p-6">
+                                    <div className="relative h-10 rounded-full bg-white/5 border border-white/10 overflow-hidden flex shadow-inner">
+                                        {/* Progress fill */}
+                                        <div
+                                            className="absolute top-0 left-0 h-full pointer-events-none transition-all duration-1000 ease-linear shadow-[0_0_20px_rgba(59,130,246,0.3)]"
+                                            style={{ width: `${globalProgressPercent}%` }}
+                                        >
+                                            <div className="w-full h-full bg-gradient-to-r from-blue-600/60 to-purple-500/80" />
+                                        </div>
+
+                                        {/* Cycle dividers & labels */}
+                                        {[1, 2, 3, 4].map((c) => (
+                                            <div key={c} className={`flex-1 flex items-center justify-center border-r border-white/10 last:border-0 relative z-10 transition-colors ${currentCycle === c ? 'bg-white/10' : ''}`}>
+                                                <span className={`font-mono text-sm uppercase tracking-wider drop-shadow-md ${currentCycle === c ? 'font-bold text-white' : 'font-medium text-white/50'}`}>
+                                                    CYCLE {c} <span className="text-xs opacity-75">({cycleMins}M)</span>
+                                                </span>
+                                            </div>
+                                        ))}
                                     </div>
                                 </CardContent>
-                                <div className="border-t border-white/5 bg-white/5 grid grid-cols-3 divide-x divide-white/10">
-                                    <button onClick={() => startPhase('annonce')} className={`p-4 flex flex-col items-center justify-center gap-2 transition-colors hover:bg-blue-500/10 ${currentPhase === 'annonce' ? 'bg-blue-500/20' : ''}`}>
-                                        <span className="font-mono text-xs font-bold text-blue-400">01. ANNONCE</span>
-                                        <span className="font-mono text-[10px] text-muted-foreground">{game?.settings?.annonce || 4} MINUTES</span>
-                                    </button>
-                                    <button onClick={() => startPhase('contests')} className={`p-4 flex flex-col items-center justify-center gap-2 transition-colors hover:bg-purple-500/10 ${currentPhase === 'contests' ? 'bg-purple-500/20' : ''}`}>
-                                        <span className="font-mono text-xs font-bold text-purple-400">02. CONTESTS</span>
-                                        <span className="font-mono text-[10px] text-muted-foreground">{game?.settings?.contests || 7} MINUTES</span>
-                                    </button>
-                                    <button onClick={() => startPhase('temps_libre')} className={`p-4 flex flex-col items-center justify-center gap-2 transition-colors hover:bg-green-500/10 ${currentPhase === 'temps_libre' ? 'bg-green-500/20' : ''}`}>
-                                        <span className="font-mono text-xs font-bold text-green-400">03. TEMPS LIBRE</span>
-                                        <span className="font-mono text-[10px] text-muted-foreground">{game?.settings?.temps_libre || 9} MINUTES</span>
-                                    </button>
-                                </div>
                             </Card>
 
-                            {/* PHASE INFO & ACTIONS */}
-                            <div className="space-y-6">
-                                <Card className="glass-panel border-white/10 bg-background/50 h-full">
-                                    <CardHeader>
-                                        <CardTitle className="font-mono text-sm text-muted-foreground">PHASE_DIRECTIVES</CardTitle>
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                {/* TIMER & MAIN CONTROLS */}
+                                <Card className="glass-panel border-white/10 bg-background/50 lg:col-span-2">
+                                    <CardHeader className="border-b border-white/5 pb-4">
+                                        <CardTitle className="font-mono flex items-center gap-2 text-xl">
+                                            <Timer className="w-6 h-6 text-blue-400" />
+                                            CYCLE {currentCycle} OF 4
+                                        </CardTitle>
+                                        <CardDescription className="font-mono text-xs text-muted-foreground uppercase">
+                                            {currentPhase !== 'setup' ? PHASE_CONFIG[currentPhase as keyof typeof PHASE_CONFIG]?.title : "EN ATTENTE"}
+                                        </CardDescription>
                                     </CardHeader>
-                                    <CardContent className="font-mono text-sm space-y-4">
-                                        {currentPhase === 'setup' && (
-                                            <div className="text-white/60 text-center py-8">
-                                                Select a phase to begin Cycle {currentCycle}.
-                                            </div>
-                                        )}
-                                        {currentPhase === 'annonce' && (
-                                            <div className="space-y-4">
-                                                <p className="text-blue-400 font-bold">1. Affichez les 4 Contests à l'écran principal.</p>
-                                                <p>2. Laissez les brigades lire le Brief.</p>
-                                                <p>3. Les brigades dispatchent leurs représentants physiquement dans les salles.</p>
-                                                <Badge variant="outline" className="text-blue-400 border-blue-400/50 w-full justify-center mt-4">PRÉPARATION</Badge>
-                                            </div>
-                                        )}
-                                        {currentPhase === 'contests' && (
-                                            <div className="space-y-4">
-                                                <p className="text-purple-400 font-bold">1. Les Staffs locaux lancent les Contests.</p>
-                                                <p>2. Veillez au respect du temps.</p>
-                                                <p>3. Notez les brigades gagnantes dans le système (bientôt dispo).</p>
-                                                <Badge variant="outline" className="text-purple-400 border-purple-400/50 w-full justify-center mt-4">ACTION EN COURS</Badge>
-                                            </div>
-                                        )}
-                                        {currentPhase === 'temps_libre' && (
-                                            <div className="space-y-4">
-                                                <p className="text-green-400 font-bold">1. Les joueurs retournent au QG.</p>
-                                                <p>2. Ils déchiffrent au Labo, négocient à l'Office.</p>
-                                                <p>3. Débrief inter-brigades : "Quelle est la strat pour le prochain ?"</p>
-                                                <div className="bg-red-500/10 border border-red-500/30 p-3 rounded mt-4">
-                                                    <p className="text-xs text-red-400 flex items-center gap-2 font-bold mb-1"><AlertTriangle className="w-3 h-3" /> GLITCH ALERT</p>
-                                                    <p className="text-[10px] text-white/80">Des évènements imprévus peuvent se déclencher maintenant.</p>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </CardContent>
-                                    {currentPhase === 'temps_libre' && timeLeft === 0 && (
-                                        <CardFooter className="pt-4 border-t border-white/5">
-                                            <Button onClick={advanceCycle} className="w-full font-mono bg-white hover:bg-neutral-200 text-black">
-                                                <ChevronsRight className="w-4 h-4 mr-2" />
-                                                PASSER AU CYCLE {currentCycle + 1}
+                                    <CardContent className="p-8 flex flex-col items-center justify-center">
+                                        <div className={`text-7xl md:text-9xl font-black font-mono tracking-tighter transition-colors ${timeLeft <= 60 && timerActive && timeLeft > 0 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                                            {formatTime(timeLeft)}
+                                        </div>
+                                        <div className="flex gap-4 mt-8">
+                                            <Button size="lg" onClick={toggleTimer} className="font-mono bg-white/10 hover:bg-white/20 border border-white/20 h-16 w-16 p-0 rounded-full flex items-center justify-center" disabled={currentPhase === 'setup'}>
+                                                {timerActive ? <Pause className="w-8 h-8" /> : <Play className="w-8 h-8 ml-1" />}
                                             </Button>
-                                        </CardFooter>
-                                    )}
+                                            <Button size="lg" onClick={() => adjustTime(60)} variant="outline" className="font-mono h-16 px-6 border-white/20">+1 MIN</Button>
+                                            <Button size="lg" onClick={() => adjustTime(-60)} variant="outline" className="font-mono h-16 px-6 border-white/20">-1 MIN</Button>
+                                        </div>
+                                    </CardContent>
+                                    <div className="border-t border-white/5 bg-white/5 grid grid-cols-3 divide-x divide-white/10">
+                                        <button onClick={() => startPhase('annonce')} className={`p-4 flex flex-col items-center justify-center gap-2 transition-colors hover:bg-blue-500/10 ${currentPhase === 'annonce' ? 'bg-blue-500/20' : ''}`}>
+                                            <span className="font-mono text-xs font-bold text-blue-400">01. ANNONCE</span>
+                                            <span className="font-mono text-[10px] text-muted-foreground">{game?.settings?.annonce || 4} MINUTES</span>
+                                        </button>
+                                        <button onClick={() => startPhase('contests')} className={`p-4 flex flex-col items-center justify-center gap-2 transition-colors hover:bg-purple-500/10 ${currentPhase === 'contests' ? 'bg-purple-500/20' : ''}`}>
+                                            <span className="font-mono text-xs font-bold text-purple-400">02. CONTESTS</span>
+                                            <span className="font-mono text-[10px] text-muted-foreground">{game?.settings?.contests || 7} MINUTES</span>
+                                        </button>
+                                        <button onClick={() => startPhase('temps_libre')} className={`p-4 flex flex-col items-center justify-center gap-2 transition-colors hover:bg-green-500/10 ${currentPhase === 'temps_libre' ? 'bg-green-500/20' : ''}`}>
+                                            <span className="font-mono text-xs font-bold text-green-400">03. TEMPS LIBRE</span>
+                                            <span className="font-mono text-[10px] text-muted-foreground">{game?.settings?.temps_libre || 9} MINUTES</span>
+                                        </button>
+                                    </div>
                                 </Card>
+
+                                {/* PHASE INFO & ACTIONS */}
+                                <div className="space-y-6">
+                                    <Card className="glass-panel border-white/10 bg-background/50 h-full">
+                                        <CardHeader>
+                                            <CardTitle className="font-mono text-sm text-muted-foreground">PHASE_DIRECTIVES</CardTitle>
+                                        </CardHeader>
+                                        <CardContent className="font-mono text-sm space-y-4">
+                                            {currentPhase === 'setup' && (
+                                                <div className="text-white/60 text-center py-8">
+                                                    Select a phase to begin Cycle {currentCycle}.
+                                                </div>
+                                            )}
+                                            {currentPhase === 'annonce' && (
+                                                <div className="space-y-4">
+                                                    <p className="text-blue-400 font-bold">1. Affichez les 4 Contests à l'écran principal.</p>
+                                                    <p>2. Laissez les brigades lire le Brief.</p>
+                                                    <p>3. Les brigades dispatchent leurs représentants physiquement dans les salles.</p>
+                                                    <Badge variant="outline" className="text-blue-400 border-blue-400/50 w-full justify-center mt-4">PRÉPARATION</Badge>
+                                                </div>
+                                            )}
+                                            {currentPhase === 'contests' && (
+                                                <div className="space-y-4">
+                                                    <p className="text-purple-400 font-bold">1. Les Staffs locaux lancent les Contests.</p>
+                                                    <p>2. Veillez au respect du temps.</p>
+                                                    <p>3. Notez les brigades gagnantes dans le système (bientôt dispo).</p>
+                                                    <Badge variant="outline" className="text-purple-400 border-purple-400/50 w-full justify-center mt-4">ACTION EN COURS</Badge>
+                                                </div>
+                                            )}
+                                            {currentPhase === 'temps_libre' && (
+                                                <div className="space-y-4">
+                                                    <p className="text-green-400 font-bold">1. Les joueurs retournent au QG.</p>
+                                                    <p>2. Ils déchiffrent au Labo, négocient à l'Office.</p>
+                                                    <p>3. Débrief inter-brigades : "Quelle est la strat pour le prochain ?"</p>
+                                                    <div className="bg-red-500/10 border border-red-500/30 p-3 rounded mt-4">
+                                                        <p className="text-xs text-red-400 flex items-center gap-2 font-bold mb-1"><AlertTriangle className="w-3 h-3" /> GLITCH ALERT</p>
+                                                        <p className="text-[10px] text-white/80">Des évènements imprévus peuvent se déclencher maintenant.</p>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </CardContent>
+                                        {currentPhase === 'temps_libre' && timeLeft === 0 && (
+                                            <CardFooter className="pt-4 border-t border-white/5">
+                                                <Button onClick={advanceCycle} className="w-full font-mono bg-white hover:bg-neutral-200 text-black">
+                                                    <ChevronsRight className="w-4 h-4 mr-2" />
+                                                    PASSER AU CYCLE {currentCycle + 1}
+                                                </Button>
+                                            </CardFooter>
+                                        )}
+                                    </Card>
+                                </div>
                             </div>
                         </div>
                     )}
