@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -28,10 +28,24 @@ export default function StaffDashboard() {
     const [currentPhase, setCurrentPhase] = useState<GamePhase>('setup');
     const [timeLeft, setTimeLeft] = useState(0); // in seconds
     const [timerActive, setTimerActive] = useState(false);
+    const [timerKey, setTimerKey] = useState(0); // incrémenté à chaque démarrage pour forcer le reset de l'intervalle
     const [globalTimer, setGlobalTimer] = useState(0);
     const [phaseTimers, setPhaseTimers] = useState<{ [key: string]: number }>({});
     const [cycleContests, setCycleContests] = useState<Record<string, any[]>>({});
     const [contestAssignments, setContestAssignments] = useState<Record<string, Record<string, string>>>({});
+
+    // Refs pour éviter les closures obsolètes dans les effets du timer
+    const currentPhaseRef = useRef<GamePhase>('setup');
+    const currentCycleRef = useRef(1);
+    const timerActiveRef = useRef(false);
+    const timeLeftRef = useRef(0);
+    const globalTimerRef = useRef(0);
+    const phaseTimersRef = useRef<{ [key: string]: number }>({});
+    const contestAssignmentsRef = useRef<Record<string, Record<string, string>>>({});
+    const gameIdRef = useRef<string | null>(null);
+    const gameSettingsRef = useRef<any>(null);
+    // Flag pour bloquer la resync externe pendant une transition automatique
+    const isTransitioningRef = useRef(false);
 
     useEffect(() => {
         // Attempt to find game by ID or assume staffId is a code.
@@ -62,7 +76,7 @@ export default function StaffDashboard() {
                 // Restore Timers from active_contest if exists
                 if (gameData.active_contest) {
                     try {
-                        const tc = JSON.parse(gameData.active_contest);
+                        const tc = typeof gameData.active_contest === 'string' ? JSON.parse(gameData.active_contest) : gameData.active_contest;
                         const elapsedSinceUpdate = Math.floor((Date.now() - tc.updatedAt) / 1000);
                         if (tc.timerActive && tc.updatedAt) {
                             setTimeLeft(Math.max(0, tc.timeLeft - elapsedSinceUpdate));
@@ -76,7 +90,10 @@ export default function StaffDashboard() {
                         if (tc.phaseTimers) {
                             setPhaseTimers(tc.phaseTimers);
                         }
-                    } catch (e) { }
+                        if (tc.contestAssignments) {
+                            setContestAssignments(tc.contestAssignments);
+                        }
+                    } catch (e) { console.error("Error parsing initial active_contest:", e); }
                 }
 
                 // Setup realtime sync
@@ -94,16 +111,16 @@ export default function StaffDashboard() {
         initStaff();
     }, [staffId]);
 
-    useEffect(() => {
-        let interval: NodeJS.Timeout;
-        if (timerActive) {
-            interval = setInterval(() => {
-                setTimeLeft(prev => Math.max(0, prev - 1));
-                setGlobalTimer(prev => prev + 1);
-            }, 1000);
-        }
-        return () => clearInterval(interval);
-    }, [timerActive]);
+    // Synchroniser les refs avec les états
+    useEffect(() => { currentPhaseRef.current = currentPhase; }, [currentPhase]);
+    useEffect(() => { currentCycleRef.current = currentCycle; }, [currentCycle]);
+    useEffect(() => { timerActiveRef.current = timerActive; }, [timerActive]);
+    useEffect(() => { timeLeftRef.current = timeLeft; }, [timeLeft]);
+    useEffect(() => { globalTimerRef.current = globalTimer; }, [globalTimer]);
+    useEffect(() => { phaseTimersRef.current = phaseTimers; }, [phaseTimers]);
+    useEffect(() => { contestAssignmentsRef.current = contestAssignments; }, [contestAssignments]);
+    useEffect(() => { gameIdRef.current = gameId; }, [gameId]);
+    useEffect(() => { gameSettingsRef.current = game?.settings; }, [game?.settings]);
 
     useEffect(() => {
         if (game?.status) {
@@ -125,19 +142,154 @@ export default function StaffDashboard() {
         }
     }, [game?.status]);
 
-    useEffect(() => {
-        if (timeLeft === 0 && timerActive) {
-            setTimerActive(false);
-            const updatedPhaseTimers = { ...phaseTimers };
-            if (currentPhase !== 'setup' && currentPhase !== 'finished') {
-                updatedPhaseTimers[currentPhase] = 0;
-            }
-            setPhaseTimers(updatedPhaseTimers);
-            const syncData = JSON.stringify({ timeLeft: 0, globalTime: globalTimer, timerActive: false, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers });
-            setGame((prev: any) => ({ ...prev, active_contest: syncData }));
-            supabase.from('games').update({ active_contest: syncData }).eq('id', gameId);
+    // Fonction de transition automatique — lit toujours les refs fraîches
+    const autoAdvancePhase = useCallback(async () => {
+        if (isTransitioningRef.current) return;
+        isTransitioningRef.current = true;
+
+        const phase = currentPhaseRef.current;
+        const cycle = currentCycleRef.current;
+        const currentGlobalTimer = globalTimerRef.current;
+        const currentPhaseTimers = phaseTimersRef.current;
+        const currentContestAssignments = contestAssignmentsRef.current;
+        const currentGameId = gameIdRef.current;
+        const settings = gameSettingsRef.current;
+        const M_TO_S = 60;
+
+        const updatedPhaseTimers = { ...currentPhaseTimers };
+        if (phase !== 'setup' && phase !== 'finished') {
+            updatedPhaseTimers[phase] = 0;
         }
-    }, [timeLeft, timerActive, globalTimer, gameId, phaseTimers, currentPhase]);
+
+        let nextPhase: GamePhase = phase;
+        let nextCycle = cycle;
+        let logMessage = '';
+
+        if (phase === 'annonce') {
+            nextPhase = 'contests';
+            logMessage = `[SYSTEM] Temps écoulé (Annonce). Lancement automatique de l'étape : CONTESTS.`;
+        } else if (phase === 'contests') {
+            nextPhase = 'temps_libre';
+            logMessage = `[SYSTEM] Temps écoulé (Contests). Lancement automatique de l'étape : TEMPS LIBRE.`;
+        } else if (phase === 'temps_libre') {
+            if (cycle < 4) {
+                nextCycle = cycle + 1;
+                nextPhase = 'annonce';
+                logMessage = `[SYSTEM] Fin du cycle ${cycle}. Lancement automatique du CYCLE ${nextCycle} : ANNONCE.`;
+            } else {
+                nextPhase = 'finished';
+                logMessage = `[SYSTEM] Fin de la partie. CLÔTURE DE L'INSTANCE.`;
+            }
+        }
+
+        if (nextPhase === 'finished') {
+            setCurrentPhase('finished');
+            setTimerActive(false);
+            const syncData = JSON.stringify({ timeLeft: 0, globalTime: currentGlobalTimer, timerActive: false, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments: currentContestAssignments });
+            setGame((prev: any) => ({ ...prev, status: 'finished', active_contest: syncData }));
+            await supabase.from('games').update({ status: 'finished', active_contest: syncData }).eq('id', currentGameId);
+            await supabase.from('game_logs').insert({ game_id: currentGameId, event_type: 'game_finish', message: logMessage });
+            isTransitioningRef.current = false;
+            return;
+        }
+
+        // Préparer la nouvelle phase
+        let newPhaseTimers = { ...updatedPhaseTimers };
+        let newContestAssignments = { ...currentContestAssignments };
+        const cycleChanged = nextCycle !== cycle;
+
+        if (cycleChanged) {
+            newPhaseTimers = {};
+            newContestAssignments = {};
+            setCurrentCycle(nextCycle);
+            setContestAssignments({});
+        }
+
+        const defaultTime = nextPhase === 'annonce'
+            ? (settings?.annonce || 4)
+            : nextPhase === 'contests'
+                ? (settings?.contests || 9)
+                : (settings?.temps_libre || 7);
+        const nextTime = newPhaseTimers[nextPhase] !== undefined ? newPhaseTimers[nextPhase] : (defaultTime * M_TO_S);
+
+        // Mettre à jour la ref synchronement AVANT de démarrer le nouveau timer
+        timeLeftRef.current = nextTime;
+        currentPhaseRef.current = nextPhase;
+        currentCycleRef.current = nextCycle;
+
+        setCurrentPhase(nextPhase);
+        setTimeLeft(nextTime);
+        setPhaseTimers(newPhaseTimers);
+        // Incrémenter timerKey pour forcer le useEffect de l'intervalle à créer un nouvel interval
+        setTimerKey(k => k + 1);
+        setTimerActive(true);
+
+        const syncData = JSON.stringify({ timeLeft: nextTime, globalTime: currentGlobalTimer, timerActive: true, updatedAt: Date.now(), phaseTimers: newPhaseTimers, contestAssignments: newContestAssignments });
+        setGame((prev: any) => ({ ...prev, status: `${nextPhase}_c${nextCycle}`, active_contest: syncData }));
+        await supabase.from('games').update({ status: `${nextPhase}_c${nextCycle}`, active_contest: syncData }).eq('id', currentGameId);
+        await supabase.from('game_logs').insert({
+            game_id: currentGameId,
+            event_type: cycleChanged ? 'cycle_change' : 'phase_change',
+            message: logMessage
+        });
+
+        // Débloquer après un court délai pour laisser les refs se mettre à jour
+        setTimeout(() => { isTransitioningRef.current = false; }, 500);
+    }, []);
+
+    // Tick du timer — timerKey force la recréation de l'intervalle à chaque nouveau démarrage
+    useEffect(() => {
+        if (!timerActive) return;
+
+        const interval = setInterval(() => {
+            const newTimeLeft = Math.max(0, timeLeftRef.current - 1);
+            timeLeftRef.current = newTimeLeft;
+            setTimeLeft(newTimeLeft);
+            globalTimerRef.current = globalTimerRef.current + 1;
+            setGlobalTimer(prev => prev + 1);
+
+            // Détecter la fin du timer directement dans le tick
+            if (newTimeLeft === 0) {
+                clearInterval(interval);
+                timerActiveRef.current = false;
+                setTimerActive(false);
+
+                const phase = currentPhaseRef.current;
+                if (phase === 'annonce' || phase === 'contests' || phase === 'temps_libre') {
+                    autoAdvancePhase();
+                }
+            }
+        }, 1000);
+
+        return () => clearInterval(interval);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [timerActive, timerKey, autoAdvancePhase]);
+
+    // Sync depuis la DB quand un autre client met à jour (ne pas rejouer si c'est nous qui venons de le faire)
+    useEffect(() => {
+        if (game?.active_contest) {
+            // Si une transition est en cours côté local, ignorer la resync
+            if (isTransitioningRef.current) return;
+            try {
+                const tc = typeof game.active_contest === 'string' ? JSON.parse(game.active_contest) : game.active_contest;
+                if (tc.updatedAt) {
+                    const elapsedSinceUpdate = Math.floor((Date.now() - tc.updatedAt) / 1000);
+                    if (tc.timerActive) {
+                        const newTL = Math.max(0, tc.timeLeft - elapsedSinceUpdate);
+                        timeLeftRef.current = newTL;
+                        setTimeLeft(newTL);
+                        setTimerActive(true);
+                    } else {
+                        timeLeftRef.current = tc.timeLeft;
+                        setTimeLeft(tc.timeLeft);
+                        setTimerActive(false);
+                    }
+                    if (tc.phaseTimers) setPhaseTimers(tc.phaseTimers);
+                    if (tc.contestAssignments) setContestAssignments(tc.contestAssignments);
+                }
+            } catch (e) { }
+        }
+    }, [game?.active_contest]);
 
     const fetchPlayers = async (gId: string) => {
         // Players are linked to brigade, so we fetch players of brigades in this game.
@@ -229,9 +381,9 @@ export default function StaffDashboard() {
     // --- GAME CONTROL LOGIC ---
     const M_TO_S = 60;
     const PHASE_CONFIG = {
-        'annonce': { title: "ANNONCE & DISPATCH", time: (game?.settings?.annonce || 4) * M_TO_S, desc: "Annonce des 4 Contests. Les brigades répartissent leurs cibles." },
-        'contests': { title: "CONTESTS", time: (game?.settings?.contests || 7) * M_TO_S, desc: "Mini-jeux simultanés. Résolution des épreuves." },
-        'temps_libre': { title: "TEMPS LIBRE", time: (game?.settings?.temps_libre || 9) * M_TO_S, desc: "Déchiffrement, Office, Comptoir, Espionnage et Débrief." }
+        'annonce': { title: "ANNONCE & DISPATCH", time: (game?.settings?.annonce || 4) * M_TO_S, desc: "Annonce des 3 Contests. Les brigades répartissent leurs cibles." },
+        'contests': { title: "CONTESTS", time: (game?.settings?.contests || 9) * M_TO_S, desc: "Mini-jeux simultanés. Résolution des épreuves." },
+        'temps_libre': { title: "TEMPS LIBRE", time: (game?.settings?.temps_libre || 7) * M_TO_S, desc: "Déchiffrement, Office, Comptoir, Espionnage et Débrief." }
     };
 
     const startPhase = async (phase: 'annonce' | 'contests' | 'temps_libre') => {
@@ -242,24 +394,46 @@ export default function StaffDashboard() {
 
         const t = updatedPhaseTimers[phase] !== undefined ? updatedPhaseTimers[phase] : PHASE_CONFIG[phase].time;
 
+        // Mettre à jour les refs synchronement AVANT de démarrer le timer
+        timeLeftRef.current = t;
+        currentPhaseRef.current = phase;
+
         setCurrentPhase(phase);
         setTimeLeft(t);
         setPhaseTimers(updatedPhaseTimers);
+        setTimerKey(k => k + 1); // forcer la recréation de l'intervalle
         setTimerActive(true);
 
-        const syncData = JSON.stringify({ timeLeft: t, globalTime: globalTimer, timerActive: true, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers });
+        const syncData = JSON.stringify({ timeLeft: t, globalTime: globalTimer, timerActive: true, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments });
         // Broadcast phase and timer state to the database
         setGame((prev: any) => ({ ...prev, status: `${phase}_c${currentCycle}`, active_contest: syncData }));
         await supabase.from('games').update({ status: `${phase}_c${currentCycle}`, active_contest: syncData }).eq('id', gameId);
+
+        // Log phase change
+        await supabase.from('game_logs').insert({
+            game_id: gameId,
+            event_type: 'phase_change',
+            message: `[SYSTEM] Activation de l'étape : ${PHASE_CONFIG[phase].title}.`
+        });
     };
 
     const startGame = async () => {
-        setGame((prev: any) => ({ ...prev, status: 'active' }));
-        await supabase.from('games').update({ status: 'active' }).eq('id', gameId);
+        await supabase.from('game_logs').insert({
+            game_id: gameId,
+            event_type: 'game_start',
+            message: `[SYSTEM] INITIALISATION DES SYSTÈMES. DÉBUT DU CYCLE 1.`
+        });
+        // Automatically jump into "annonce" phase with full layout activation
+        await startPhase('annonce');
     };
 
     const toggleTimer = async () => {
         const newState = !timerActive;
+        if (newState) {
+            // Reprise : s'assurer que la ref est à jour avant de recréer l'intervalle
+            timeLeftRef.current = timeLeft;
+            setTimerKey(k => k + 1);
+        }
         setTimerActive(newState);
 
         const updatedPhaseTimers = { ...phaseTimers };
@@ -268,9 +442,15 @@ export default function StaffDashboard() {
             setPhaseTimers(updatedPhaseTimers);
         }
 
-        const syncData = JSON.stringify({ timeLeft: timeLeft, globalTime: globalTimer, timerActive: newState, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers });
+        const syncData = JSON.stringify({ timeLeft: timeLeft, globalTime: globalTimer, timerActive: newState, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments });
         setGame((prev: any) => ({ ...prev, active_contest: syncData }));
         await supabase.from('games').update({ active_contest: syncData }).eq('id', gameId);
+
+        await supabase.from('game_logs').insert({
+            game_id: gameId,
+            event_type: newState ? 'timer_resumed' : 'timer_paused',
+            message: newState ? `[SYSTEM] Temporisation : REPRISE. Protocoles en cours.` : `[SYSTEM] Temporisation : PAUSE. Suspendu par le GM.`
+        });
     };
 
     const adjustTime = async (seconds: number) => {
@@ -283,7 +463,7 @@ export default function StaffDashboard() {
             setPhaseTimers(updatedPhaseTimers);
         }
 
-        const syncData = JSON.stringify({ timeLeft: newTime, globalTime: globalTimer, timerActive, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers });
+        const syncData = JSON.stringify({ timeLeft: newTime, globalTime: globalTimer, timerActive, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments });
         setGame((prev: any) => ({ ...prev, active_contest: syncData }));
         await supabase.from('games').update({ active_contest: syncData }).eq('id', gameId);
     };
@@ -303,7 +483,7 @@ export default function StaffDashboard() {
         updatedPhaseTimers[currentPhase] = t;
         setPhaseTimers(updatedPhaseTimers);
 
-        const syncData = JSON.stringify({ timeLeft: t, globalTime: newGlobalTimer, timerActive: false, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers });
+        const syncData = JSON.stringify({ timeLeft: t, globalTime: newGlobalTimer, timerActive: false, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments });
         setGame((prev: any) => ({ ...prev, active_contest: syncData }));
         await supabase.from('games').update({ active_contest: syncData }).eq('id', gameId);
     };
@@ -320,10 +500,67 @@ export default function StaffDashboard() {
             const syncData = JSON.stringify({ timeLeft: 0, globalTime: globalTimer, timerActive: false, updatedAt: Date.now(), phaseTimers: {} });
             setGame((prev: any) => ({ ...prev, status: `setup_c${nextCycle}`, active_contest: syncData }));
             await supabase.from('games').update({ status: `setup_c${nextCycle}`, active_contest: syncData }).eq('id', gameId);
+
+            await supabase.from('game_logs').insert({
+                game_id: gameId,
+                event_type: 'cycle_change',
+                message: `[SYSTEM] FIN DU CYCLE ${currentCycle}. EN ATTENTE D'INITIALISATION DU CYCLE ${nextCycle}.`
+            });
         } else {
             setCurrentPhase('finished');
             setGame((prev: any) => ({ ...prev, status: 'finished' }));
             await supabase.from('games').update({ status: 'finished' }).eq('id', gameId);
+
+            await supabase.from('game_logs').insert({
+                game_id: gameId,
+                event_type: 'game_finish',
+                message: `[SYSTEM] FIN DES OPÉRATIONS. CLÔTURE DE L'INSTANCE.`
+            });
+        }
+    };
+
+    const handleResetInstance = async () => {
+        if (!window.confirm("⚠️ ATTENTION : Voulez-vous vraiment réinitialiser toutes les données de cette instance (objets, notes, recettes, évènements) ?\nLes joueurs, les équipes et leurs attributions de rôles seront conservés.")) {
+            return;
+        }
+
+        try {
+            const bIds = brigades.map(b => b.id);
+            if (bIds.length > 0) {
+                // Clear inventory entries (keeps the slots but empties them)
+                await supabase.from('inventory').update({ fragment_data: null }).in('brigade_id', bIds);
+                // Clear recipe notes for participating brigades
+                await supabase.from('recipe_notes').delete().in('brigade_id', bIds);
+                // Clear recipe test attempts
+                await supabase.from('recipe_tests').delete().in('brigade_id', bIds);
+                // Turn power usage tokens off for participating players
+                await supabase.from('players').update({ role_used: false }).in('brigade_id', bIds);
+            }
+
+            // Delete game logs globally for this game
+            await supabase.from('game_logs').delete().eq('game_id', gameId);
+
+            // Reset game state
+            const syncData = JSON.stringify({ timeLeft: 0, globalTime: 0, timerActive: false, updatedAt: Date.now(), phaseTimers: {}, contestAssignments: {} });
+            setGame((prev: any) => ({ ...prev, status: 'setup', active_contest: syncData }));
+            await supabase.from('games').update({
+                status: 'setup',
+                active_contest: syncData
+            }).eq('id', gameId);
+
+            // Local state resets
+            setCurrentCycle(1);
+            setCurrentPhase('setup');
+            setTimeLeft(0);
+            setGlobalTimer(0);
+            setTimerActive(false);
+            setPhaseTimers({});
+            setContestAssignments({});
+
+            alert("✅ L'instance a été réinitialisée avec succès !");
+        } catch (e) {
+            console.error("Erreur lors du reset", e);
+            alert("Une erreur s'est produite lors de la connexion à la base de données.");
         }
     };
 
@@ -335,7 +572,7 @@ export default function StaffDashboard() {
 
     if (!game) return <div className="p-8 text-white font-mono flex items-center gap-4"><Activity className="animate-spin" /> ACCÈS STAFF EN COURS...</div>;
 
-    const cycleMins = (game?.settings?.annonce || 4) + (game?.settings?.contests || 7) + (game?.settings?.temps_libre || 9);
+    const cycleMins = (game?.settings?.annonce || 4) + (game?.settings?.contests || 9) + (game?.settings?.temps_libre || 7);
     const totalMins = cycleMins * 4;
     const globalProgressPercent = Math.min(100, (globalTimer / (totalMins * 60)) * 100);
 
@@ -354,6 +591,10 @@ export default function StaffDashboard() {
                     <p className="text-muted-foreground font-mono text-sm mt-1">INSTANCE ID: {game.id.split('-')[0]}... | CYCLE: {currentCycle}/4</p>
                 </div>
                 <div className="mt-4 md:mt-0 flex gap-4">
+                    <Button variant="destructive" className="font-mono text-xs shadow-[0_0_15px_-3px_rgba(239,68,68,0.4)]" onClick={handleResetInstance}>
+                        <AlertTriangle className="w-4 h-4 mr-2" />
+                        RESET INSTANCE
+                    </Button>
                     <Button variant="outline" className="font-mono text-xs border-white/20 hover:bg-white/5" onClick={() => router.push("/")}>
                         LOGOUT
                     </Button>
@@ -470,66 +711,6 @@ export default function StaffDashboard() {
 
                                 {/* PHASE INFO & ACTIONS */}
                                 <div className="space-y-6">
-                                    {currentPhase === 'contests' && Object.keys(cycleContests).length > 0 && (
-                                        <Card className="glass-panel border-white/10 bg-background/50">
-                                            <CardHeader className="border-b border-white/5 pb-4">
-                                                <CardTitle className="font-mono text-xl flex items-center gap-2 text-purple-400">
-                                                    <Trophy className="w-5 h-5" />
-                                                    DÉCISION DES CONTESTS
-                                                </CardTitle>
-                                                <CardDescription className="font-mono text-xs">Attribuez les brigades gagnantes pour chaque Contest du cycle actuel. Cela débloquera directement leurs fragments associés.</CardDescription>
-                                            </CardHeader>
-                                            <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                                {Object.entries(cycleContests)
-                                                    .sort(([a], [b]) => a.localeCompare(b))
-                                                    .slice(0, 4)
-                                                    .map(([contestName, fragments]) => (
-                                                        <div key={contestName} className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col justify-between hover:bg-white/10 transition-colors">
-                                                            <div>
-                                                                <h3 className="font-mono font-bold text-white mb-4 flex items-center justify-between">
-                                                                    <span className="bg-purple-500/20 shadow-[0_0_15px_-3px_rgba(147,51,234,0.4)] text-purple-400 px-3 py-1 rounded text-sm tracking-wider w-full text-center">CONTEST {contestName}</span>
-                                                                </h3>
-                                                                <div className="space-y-3 mb-4">
-                                                                    {['1er', '2e', '3e'].map(pos => {
-                                                                        const frag = fragments.find(f => f.position === pos);
-                                                                        if (!frag) return null;
-                                                                        return (
-                                                                            <div key={pos} className="flex flex-col gap-1">
-                                                                                <span className="font-mono text-[10px] text-muted-foreground uppercase">{pos} <span className="text-white/30 text-[8px]">({frag.fragment_id})</span></span>
-                                                                                <select
-                                                                                    className="h-9 w-full bg-black/40 border border-white/10 rounded px-2 font-mono text-xs text-white uppercase focus:border-purple-500 outline-none transition-colors"
-                                                                                    value={contestAssignments[contestName]?.[pos] || 'null'}
-                                                                                    onChange={(e) => setContestAssignments(prev => ({
-                                                                                        ...prev,
-                                                                                        [contestName]: {
-                                                                                            ...(prev[contestName] || {}),
-                                                                                            [pos]: e.target.value
-                                                                                        }
-                                                                                    }))}
-                                                                                >
-                                                                                    <option value="null">-- BRIGADE --</option>
-                                                                                    {brigades.map(b => (
-                                                                                        <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
-                                                                                    ))}
-                                                                                </select>
-                                                                            </div>
-                                                                        );
-                                                                    })}
-                                                                </div>
-                                                            </div>
-                                                            <Button
-                                                                className="w-full font-mono text-xs bg-purple-600 hover:bg-purple-500 text-white shadow-[0_0_15px_-3px_rgba(147,51,234,0.4)] transition-all active:scale-95"
-                                                                onClick={() => handleValidateContest(contestName)}
-                                                            >
-                                                                <CheckCircle2 className="w-4 h-4 mr-2" />
-                                                                VALIDER VICTOIRE
-                                                            </Button>
-                                                        </div>
-                                                    ))}
-                                            </CardContent>
-                                        </Card>
-                                    )}
-
                                     <Card className="glass-panel border-white/10 bg-background/50 h-full">
                                         <CardHeader>
                                             <CardTitle className="font-mono text-sm text-muted-foreground">PHASE_DIRECTIVES</CardTitle>
@@ -542,7 +723,7 @@ export default function StaffDashboard() {
                                             )}
                                             {currentPhase === 'annonce' && (
                                                 <div className="space-y-4">
-                                                    <p className="text-blue-400 font-bold">1. Affichez les 4 Contests à l'écran principal.</p>
+                                                    <p className="text-blue-400 font-bold">1. Affichez les 3 Contests à l'écran principal.</p>
                                                     <p>2. Laissez les brigades lire le Brief.</p>
                                                     <p>3. Les brigades dispatchent leurs représentants physiquement dans les salles.</p>
                                                     <Badge variant="outline" className="text-blue-400 border-blue-400/50 w-full justify-center mt-4">PRÉPARATION</Badge>
@@ -579,6 +760,74 @@ export default function StaffDashboard() {
                                     </Card>
                                 </div>
                             </div>
+
+                            {currentPhase === 'contests' && Object.keys(cycleContests).length > 0 && (
+                                <Card className="glass-panel border-white/10 bg-background/50 mt-6 md:mt-8">
+                                    <CardHeader className="border-b border-white/5 pb-4">
+                                        <CardTitle className="font-mono text-xl flex items-center gap-2 text-purple-400">
+                                            <Trophy className="w-5 h-5" />
+                                            DÉCISION DES CONTESTS
+                                        </CardTitle>
+                                        <CardDescription className="font-mono text-xs">Attribuez les brigades gagnantes pour chaque Contest du cycle actuel. Cela débloquera directement leurs fragments associés.</CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                                        {Object.entries(cycleContests)
+                                            .sort(([a], [b]) => a.localeCompare(b))
+                                            .slice(0, 3)
+                                            .map(([contestName, fragments]) => (
+                                                <div key={contestName} className="bg-white/5 border border-white/10 rounded-xl p-6 flex flex-col justify-between hover:bg-white/10 transition-colors shadow-lg">
+                                                    <div>
+                                                        <h3 className="font-mono font-bold text-white mb-6 flex items-center justify-between">
+                                                            <span className="bg-purple-500/20 shadow-[0_0_15px_-3px_rgba(147,51,234,0.4)] text-purple-400 px-4 py-2 rounded text-base md:text-lg tracking-wider w-full text-center">CONTEST {contestName}</span>
+                                                        </h3>
+                                                        <div className="space-y-4 mb-6">
+                                                            {['1er', '2e', '3e'].map(pos => {
+                                                                const frag = fragments.find(f => f.position === pos);
+                                                                if (!frag) return null;
+                                                                return (
+                                                                    <div key={pos} className="flex flex-col gap-2">
+                                                                        <span className="font-mono text-sm font-bold text-muted-foreground uppercase flex items-center gap-2">
+                                                                            {pos} <span className="text-white/40 text-xs font-normal">({frag.fragment_id})</span>
+                                                                        </span>
+                                                                        <select
+                                                                            className="h-12 w-full bg-black/50 border border-white/20 rounded-md px-4 font-mono text-sm text-white uppercase focus:border-purple-500 outline-none transition-colors shadow-inner"
+                                                                            value={contestAssignments[contestName]?.[pos] || 'null'}
+                                                                            onChange={(e) => {
+                                                                                const newAssignments = {
+                                                                                    ...contestAssignments,
+                                                                                    [contestName]: {
+                                                                                        ...(contestAssignments[contestName] || {}),
+                                                                                        [pos]: e.target.value
+                                                                                    }
+                                                                                };
+                                                                                setContestAssignments(newAssignments);
+                                                                                const syncData = JSON.stringify({ timeLeft, globalTime: globalTimer, timerActive, updatedAt: Date.now(), phaseTimers, contestAssignments: newAssignments });
+                                                                                setGame((prev: any) => ({ ...prev, active_contest: syncData }));
+                                                                                supabase.from('games').update({ active_contest: syncData }).eq('id', gameId);
+                                                                            }}
+                                                                        >
+                                                                            <option value="null">-- SÉLECTIONNER UNE BRIGADE --</option>
+                                                                            {brigades.map(b => (
+                                                                                <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
+                                                                            ))}
+                                                                        </select>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                    <Button
+                                                        className="w-full font-mono text-sm h-12 bg-purple-600 hover:bg-purple-500 text-white shadow-[0_0_20px_-3px_rgba(147,51,234,0.6)] transition-all active:scale-95"
+                                                        onClick={() => handleValidateContest(contestName)}
+                                                    >
+                                                        <CheckCircle2 className="w-5 h-5 mr-3" />
+                                                        VALIDER LES VICTOIRES
+                                                    </Button>
+                                                </div>
+                                            ))}
+                                    </CardContent>
+                                </Card>
+                            )}
                         </div>
                     )}
                 </TabsContent>

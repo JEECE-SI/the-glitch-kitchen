@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Database, Plus, Settings, Users, Server, Trash2, Settings2, PlaySquare, Square } from "lucide-react";
+import { Database, Plus, Settings, Users, Server, Trash2, Settings2, PlaySquare, Square, AlertTriangle } from "lucide-react";
 import * as XLSX from "xlsx";
 
 export default function AdminDashboard() {
@@ -267,29 +267,48 @@ export default function AdminDashboard() {
         brigadeList: any[],
         availableRoles: string[]
     ): { brigade_id: string; name: string; role: string | null }[] => {
-        // Map poste -> role (match by title, case-insensitive)
+        const ROLE_MAP: Record<string, string> = {
+            "président": "Le Chef de Brigade",
+            "president": "Le Chef de Brigade",
+            "trésorier": "L'Économe",
+            "tresorier": "L'Économe",
+            "secrétaire général": "Le Garde-Manger",
+            "secretaire general": "Le Garde-Manger",
+            "responsable commercial": "Le Sourcier",
+            "commercial": "Le Sourcier",
+            "sales": "Le Sourcier",
+            "chef de projet": "Le Sous-Chef",
+            "responsable qualité": "L'Auditeur",
+            "responsable qualite": "L'Auditeur",
+            "qualité": "L'Auditeur",
+            "qualite": "L'Auditeur",
+            "responsable communication": "Le Dressage",
+            "communication": "Le Dressage",
+            "com": "Le Dressage",
+            "responsable rse": "L'Éco-Sourcier",
+            "rse": "L'Éco-Sourcier",
+            "développeur commercial": "Le Maître d'Hôtel",
+            "developpeur commercial": "Le Maître d'Hôtel",
+            "bizdev": "Le Maître d'Hôtel",
+            "dsi": "Le Hacker Chef",
+            "si": "Le Hacker Chef",
+            "it": "Le Hacker Chef",
+            "informatique": "Le Hacker Chef",
+            "tech": "Le Hacker Chef",
+        };
+
         const getPreferredRole = (poste: string): string | null => {
             if (!poste) return null;
-            const match = availableRoles.find(r => r.toLowerCase() === poste.toLowerCase());
+            const normalized = poste.toLowerCase().trim();
+            if (ROLE_MAP[normalized]) return ROLE_MAP[normalized];
+
+            // Fallback match directly if they used the literal game role name
+            const match = availableRoles.find(r => r.toLowerCase() === normalized);
             return match || null;
         };
 
-        // Group players by preferred role
-        const byRole: Map<string | null, { name: string; poste: string }[]> = new Map();
-        playerList.forEach(p => {
-            const role = getPreferredRole(p.poste);
-            if (!byRole.has(role)) byRole.set(role, []);
-            byRole.get(role)!.push(p);
-        });
-
-        // Sort roles by count ascending (rarer roles first)
-        const sortedRoles = Array.from(byRole.entries()).sort((a, b) => a[1].length - b[1].length);
-
-        // Build ordered player list: rarest role first
-        const orderedPlayers: { name: string; poste: string; preferredRole: string | null }[] = [];
-        sortedRoles.forEach(([role, players]) => {
-            players.forEach(p => orderedPlayers.push({ ...p, preferredRole: role }));
-        });
+        // Shuffle players to place them randomly in brigades
+        const shuffledPlayers = [...playerList].sort(() => 0.5 - Math.random());
 
         // Track roles used per brigade
         const brigadeRolesUsed: Map<string, Set<string>> = new Map();
@@ -297,20 +316,23 @@ export default function AdminDashboard() {
 
         const result: { brigade_id: string; name: string; role: string | null }[] = [];
 
-        // Assign players round-robin across brigades
-        orderedPlayers.forEach((player, i) => {
+        // Spread players out evenly across brigades
+        shuffledPlayers.forEach((player, i) => {
             const brigade = brigadeList[i % brigadeList.length];
             const usedRoles = brigadeRolesUsed.get(brigade.id)!;
+            const prefRole = getPreferredRole(player.poste);
 
             let assignedRole: string | null = null;
-
-            if (player.preferredRole && !usedRoles.has(player.preferredRole)) {
-                // Preferred role is free in this brigade
-                assignedRole = player.preferredRole;
+            if (prefRole && !usedRoles.has(prefRole)) {
+                assignedRole = prefRole;
             } else {
-                // Find any unused role in this brigade
-                const freeRole = availableRoles.find(r => !usedRoles.has(r));
-                assignedRole = freeRole || null;
+                // If preferred role is taken or unknown, pick a random available role
+                const freeRoles = availableRoles.filter(r => !usedRoles.has(r));
+                if (freeRoles.length > 0) {
+                    assignedRole = freeRoles[Math.floor(Math.random() * freeRoles.length)];
+                } else {
+                    assignedRole = null; // No roles left
+                }
             }
 
             if (assignedRole) usedRoles.add(assignedRole);
@@ -551,6 +573,38 @@ export default function AdminDashboard() {
         router.push(`/gm/${gameId}`);
     };
 
+    const resetAllInstances = async () => {
+        if (!confirm("⚠️ ATTENTION : Voulez-vous vraiment réinitialiser toutes les données de TOUTES les instances de jeu actives (objets, notes, recettes, évènements) ?\nLes joueurs, les équipes et leurs attributions de rôles seront conservés.")) {
+            return;
+        }
+
+        try {
+            const bIds = brigades.map((b: any) => b.id);
+            if (bIds.length > 0) {
+                await supabase.from('inventory').update({ fragment_data: null }).in('brigade_id', bIds);
+                await supabase.from('recipe_notes').delete().in('brigade_id', bIds);
+                await supabase.from('players').update({ role_used: false }).in('brigade_id', bIds);
+            }
+
+            const gIds = games.map((g: any) => g.id);
+            if (gIds.length > 0) {
+                await supabase.from('game_logs').delete().in('game_id', gIds);
+                const syncData = JSON.stringify({ timeLeft: 0, globalTime: 0, timerActive: false, updatedAt: Date.now(), phaseTimers: {}, contestAssignments: {} });
+                await supabase.from('games').update({
+                    status: 'setup',
+                    active_contest: syncData
+                }).in('id', gIds);
+            }
+
+            alert("✅ L'état de l'ensemble des instances a été réinitialisé avec succès !");
+            fetchGames();
+            fetchPlayers();
+        } catch (e: any) {
+            console.error("Erreur lors du reset global", e);
+            alert("Une erreur s'est produite lors du reset global : " + e.message);
+        }
+    };
+
     return (
         <div className="min-h-screen flex flex-col p-4 md:p-8 bg-background">
             <header className="flex items-center justify-between pb-8 border-b border-white/10 mb-8">
@@ -602,6 +656,9 @@ export default function AdminDashboard() {
                                 <p className="text-muted-foreground text-sm">Create and manage game sessions.</p>
                             </div>
                             <div className="flex items-center gap-2">
+                                <Button variant="destructive" className="font-mono text-xs shadow-[0_0_15px_-3px_rgba(239,68,68,0.4)]" onClick={resetAllInstances}>
+                                    <AlertTriangle className="w-4 h-4 mr-2" /> RESET_ALL_INSTANCES
+                                </Button>
                                 <Dialog open={isGameDialogOpen} onOpenChange={setIsGameDialogOpen}>
                                     <DialogTrigger asChild>
                                         <Button className="font-mono bg-primary hover:bg-primary/80 text-primary-foreground">

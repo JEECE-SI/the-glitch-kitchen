@@ -118,7 +118,7 @@ export default function PlayerDashboard() {
                 setInventory(invData);
             } else {
                 // Initialize inventory if missing
-                const newInv = Array.from({ length: 15 }, (_, i) => ({
+                const newInv = Array.from({ length: 50 }, (_, i) => ({
                     brigade_id: brigadeData.id,
                     slot_index: i + 1,
                     fragment_data: null
@@ -514,15 +514,7 @@ export default function PlayerDashboard() {
                     <h1 className="text-2xl md:text-3xl font-black tracking-widest font-mono text-transparent bg-clip-text bg-gradient-to-r from-white to-white/50 border-l-4 border-primary pl-4">
                         BRIGADE_{brigadeId}
                     </h1>
-                    <p className="text-muted-foreground font-mono text-xs md:text-sm mt-1 pl-5 flex items-center gap-2">
-                        <Activity className="w-3 h-3 text-green-500" />
-                        SECURE_CONNECTION
-                        {staffCode && (
-                            <span className="ml-2 px-2 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded font-bold">
-                                STAFF: {staffCode}
-                            </span>
-                        )}
-                    </p>
+
                 </div>
                 <div className="flex gap-2 w-full md:w-auto mt-4 md:mt-0">
                     <Input
@@ -541,16 +533,10 @@ export default function PlayerDashboard() {
                 </div>
 
                 <div className="flex gap-2 mt-4 md:mt-0 w-full md:w-auto justify-end">
-                    <Card className="bg-white/5 border-primary/20">
-                        <CardContent className="p-3 flex flex-col items-center justify-center min-w-[100px]">
-                            <span className="text-[10px] text-primary font-mono font-bold mb-1">PRESTIGE</span>
-                            <span className="text-2xl font-black font-mono">100</span>
-                        </CardContent>
-                    </Card>
                     <Card className="bg-white/5 border-secondary/20">
                         <CardContent className="p-3 flex flex-col items-center justify-center min-w-[100px]">
                             <span className="text-[10px] text-secondary font-mono font-bold mb-1">FRAGMENTS</span>
-                            <span className="text-2xl font-black font-mono">{inventory.filter(s => s.fragment_data).length}<span className="text-muted-foreground text-sm">/15</span></span>
+                            <span className="text-2xl font-black font-mono">{inventory.filter(s => s.fragment_data).length}<span className="text-muted-foreground text-sm">/50</span></span>
                         </CardContent>
                     </Card>
                 </div>
@@ -559,11 +545,10 @@ export default function PlayerDashboard() {
             {/* Main Content */}
             <div className="flex-1 max-w-6xl mx-auto w-full">
                 <Tabs defaultValue="intel" onValueChange={setActiveTab} className="w-full">
-                    <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 mb-4 bg-white/5 border border-white/10 p-1 rounded-xl">
-                        <TabsTrigger value="intel" className="font-mono text-xs md:text-sm data-[state=active]:bg-primary/20 glass-panel">INTEL_FEED</TabsTrigger>
-                        <TabsTrigger value="recipe" className="font-mono text-xs md:text-sm data-[state=active]:bg-green-500/20 glass-panel">RECIPE_ASSEMBLY</TabsTrigger>
-                        <TabsTrigger value="contests" className="font-mono text-xs md:text-sm data-[state=active]:bg-primary/20 glass-panel">ACTIVE_CONTESTS</TabsTrigger>
-                        <TabsTrigger value="roster" className="font-mono text-xs md:text-sm data-[state=active]:bg-secondary/20 glass-panel">BRIGADE_ROSTER</TabsTrigger>
+                    <TabsList className="grid w-full grid-cols-1 md:grid-cols-3 mb-4 bg-white/5 border border-white/10 p-1 rounded-xl gap-1">
+                        <TabsTrigger value="intel" className="font-mono text-xs md:text-sm data-[state=active]:bg-primary/20 glass-panel h-auto py-2">INTEL_FEED</TabsTrigger>
+                        <TabsTrigger value="recipe" className="font-mono text-xs md:text-sm data-[state=active]:bg-green-500/20 glass-panel h-auto py-2">RECIPE_ASSEMBLY</TabsTrigger>
+                        <TabsTrigger value="roster" className="font-mono text-xs md:text-sm data-[state=active]:bg-secondary/20 glass-panel h-auto py-2">BRIGADE_ROSTER</TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="intel" className="space-y-6">
@@ -591,24 +576,34 @@ export default function PlayerDashboard() {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             {/* Logs - left */}
-                            <Card className="glass-panel border-white/10 bg-background/50 h-[400px] flex flex-col">
+                            <Card className="glass-panel border-white/10 bg-background/50 h-[400px] flex flex-col lg:col-span-2">
                                 <CardHeader className="border-b border-white/5 pb-4">
-                                    <CardTitle className="font-mono text-lg flex items-center gap-2">
-                                        <Terminal className="w-5 h-5 text-secondary" />
+                                    <CardTitle className="font-mono text-lg flex items-center gap-2 text-primary">
+                                        <Terminal className="w-5 h-5" />
                                         SYSTEM_BROADCAST
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="flex-1 overflow-auto p-4 space-y-4 font-mono text-sm">
-                                    {gameLogs.map(log => (
-                                        <div key={log.id} className={`border-l-2 pl-3 ${log.event_type === 'contest_won' ? 'border-yellow-500 text-yellow-500 font-bold' : log.event_type === 'fragment_unlocked' ? 'border-secondary text-secondary/90' : 'border-primary'}`}>
-                                            <span className="text-xs text-muted-foreground block mb-1">
-                                                {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                                            </span>
-                                            <span>{log.message}</span>
-                                        </div>
-                                    ))}
+                                    {gameLogs.map(log => {
+                                        let logStyle = 'border-primary text-white';
+                                        if (log.event_type === 'contest_won') logStyle = 'border-yellow-500 text-yellow-500 font-bold bg-yellow-500/5 py-1 -mx-1 px-1 rounded-r border-l-4';
+                                        else if (log.event_type === 'fragment_unlocked') logStyle = 'border-secondary text-secondary/90';
+                                        else if (log.event_type === 'game_start' || log.event_type === 'game_finish') logStyle = 'border-red-500 text-red-400 font-bold bg-red-500/5 py-1 -mx-1 px-1 rounded-r border-l-4 tracking-wider';
+                                        else if (log.event_type === 'phase_change' || log.event_type === 'cycle_change') logStyle = 'border-blue-500 text-blue-300 font-bold';
+                                        else if (log.event_type === 'timer_paused') logStyle = 'border-orange-500 text-orange-400 italic';
+                                        else if (log.event_type === 'timer_resumed') logStyle = 'border-green-500 text-green-400 italic';
+
+                                        return (
+                                            <div key={log.id} className={`border-l-2 pl-3 ${logStyle}`}>
+                                                <span className="text-xs text-muted-foreground block mb-1">
+                                                    {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                                </span>
+                                                <span>{log.message}</span>
+                                            </div>
+                                        );
+                                    })}
                                     {gameLogs.length === 0 && (
                                         <div className="border-l-2 border-primary pl-3">
                                             <span className="text-xs text-muted-foreground block mb-1">System init</span>
@@ -619,8 +614,8 @@ export default function PlayerDashboard() {
                             </Card>
 
                             {/* Brigade Rankings - right */}
-                            <Card className="glass-panel border-white/10 bg-background/50 h-[400px] flex flex-col">
-                                <CardHeader className="border-b border-white/5 pb-4">
+                            <Card className="glass-panel border-white/10 bg-background/50 h-[400px] flex flex-col lg:col-span-1 shadow-2xl shadow-yellow-500/5">
+                                <CardHeader className="border-b border-white/5 pb-4 bg-gradient-to-b from-white/5 to-transparent">
                                     <CardTitle className="font-mono text-lg flex items-center gap-2 text-yellow-400">
                                         <Trophy className="w-5 h-5" />
                                         RECIPE_LEADERBOARD
@@ -641,26 +636,42 @@ export default function PlayerDashboard() {
                                                     b.best_score >= 80 ? 'text-green-400' :
                                                         b.best_score >= 50 ? 'text-yellow-400' :
                                                             b.best_score >= 25 ? 'text-orange-400' : 'text-red-400';
-                                                const scoreBg = b.best_score < 0 ? 'bg-white/5 border-white/10' :
-                                                    b.best_score >= 80 ? 'bg-green-500/10 border-green-500/30' :
-                                                        b.best_score >= 50 ? 'bg-yellow-500/10 border-yellow-500/30' :
-                                                            b.best_score >= 25 ? 'bg-orange-500/10 border-orange-500/30' : 'bg-red-500/10 border-red-500/30';
+
+                                                const progressWidth = b.best_score < 0 ? 0 : b.best_score;
+                                                const progressColor = b.best_score < 0 ? 'bg-white/5' :
+                                                    b.best_score >= 80 ? 'bg-green-500' :
+                                                        b.best_score >= 50 ? 'bg-yellow-500' :
+                                                            b.best_score >= 25 ? 'bg-orange-500' : 'bg-red-500';
+
                                                 return (
-                                                    <div key={b.code} className={`flex items-center justify-between px-3 py-2.5 rounded-lg border transition-all ${scoreBg} ${isMe ? 'ring-1 ring-primary/50' : ''}`}>
-                                                        <div className="flex items-center gap-2 min-w-0">
-                                                            <span className="text-base w-7 shrink-0 text-center">{medal}</span>
-                                                            <div className="min-w-0">
-                                                                <p className={`text-xs font-bold truncate ${isMe ? 'text-primary' : 'text-white'}`}>{b.name}</p>
-                                                                {isMe && <span className="text-[9px] text-primary/70 uppercase">← vous</span>}
+                                                    <div key={b.code} className={`relative overflow-hidden flex items-center justify-between p-3 py-3.5 rounded-xl border border-white/5 bg-gradient-to-br from-white/5 to-transparent backdrop-blur-sm transition-all duration-300 hover:border-white/20 ${isMe ? 'ring-1 ring-primary ring-offset-1 ring-offset-background bg-primary/5' : ''}`}>
+                                                        {/* Progress bar background */}
+                                                        {b.best_score >= 0 && (
+                                                            <div className={`absolute bottom-0 left-0 h-[2px] ${progressColor} opacity-70 transition-all duration-1000 ease-out`} style={{ width: `${progressWidth}%` }} />
+                                                        )}
+
+                                                        <div className="flex items-center gap-3 min-w-0 z-10">
+                                                            <div className={`flex items-center justify-center w-8 h-8 rounded-full bg-black/40 border border-white/5 text-sm shadow-inner shrink-0 ${idx < 3 ? 'ring-1 ring-yellow-500/30 bg-yellow-500/5' : ''}`}>
+                                                                {medal}
+                                                            </div>
+                                                            <div className="min-w-0 flex flex-col justify-center">
+                                                                <p className={`text-sm tracking-wide font-black truncate drop-shadow-md ${isMe ? 'text-primary' : 'text-white/90'}`}>
+                                                                    {b.name}
+                                                                </p>
+                                                                {isMe && <span className="text-[9px] font-sans text-primary/70 uppercase tracking-widest leading-none mt-0.5">VOTRE BRIGADE</span>}
                                                             </div>
                                                         </div>
-                                                        <div className="shrink-0 text-right">
+
+                                                        <div className="shrink-0 text-right z-10 pl-3 border-l border-white/5 flex flex-col justify-center items-end">
                                                             {b.best_score < 0 ? (
-                                                                <span className="text-xs text-white/20">—</span>
+                                                                <span className="text-xs text-white/20 font-sans tracking-widest">AWAITING</span>
                                                             ) : (
                                                                 <>
-                                                                    <span className={`text-lg font-black ${scoreColor}`}>{b.best_score}<span className="text-xs font-normal">%</span></span>
-                                                                    <p className="text-[9px] text-white/30">essai {b.attempt}</p>
+                                                                    <div className="flex items-baseline justify-end gap-0.5 drop-shadow-md">
+                                                                        <span className={`text-xl font-black ${scoreColor} leading-none`}>{b.best_score}</span>
+                                                                        <span className="text-xs font-normal text-white/50">%</span>
+                                                                    </div>
+                                                                    <p className="text-[9px] text-white/40 font-sans tracking-widest mt-1">ESSAI {b.attempt}/3</p>
                                                                 </>
                                                             )}
                                                         </div>
@@ -961,15 +972,6 @@ export default function PlayerDashboard() {
                         )}
                     </TabsContent>
 
-                    <TabsContent value="contests">
-                        <div className="flex flex-col items-center justify-center h-64 border border-white/10 rounded-lg glass-panel">
-                            <Zap className="w-12 h-12 text-primary mb-4 opacity-50" />
-                            <p className="font-mono text-muted-foreground text-center">
-                                NO_ACTIVE_CONTESTS_DETECTED<br />
-                                <span className="text-xs">Awaiting broadcast from GM_TERMINAL</span>
-                            </p>
-                        </div>
-                    </TabsContent>
 
                     <TabsContent value="roster" className="space-y-6">
                         <Card className="glass-panel border-secondary/30">
