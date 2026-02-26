@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 import { rateLimit } from "@/lib/rateLimit";
 
@@ -11,7 +11,7 @@ export const maxDuration = 60;
 // In-memory cache to prevent duplicate concurrent requests
 const processingRequests = new Map<string, Promise<NextResponse>>();
 
-const ANTHROPIC_MODEL = "claude-3-5-haiku-20241022";
+const OPENROUTER_MODEL = "anthropic/claude-3.5-haiku";
 
 // Lazy Supabase client initialization to avoid build-time errors
 function getSupabaseClient() {
@@ -59,10 +59,10 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
-        if (!ANTHROPIC_API_KEY) {
+        const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
+        if (!OPENROUTER_API_KEY) {
             return NextResponse.json(
-                { error: "ANTHROPIC_API_KEY is not configured on the server." },
+                { error: "OPENROUTER_API_KEY is not configured on the server." },
                 { status: 500 }
             );
         }
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
         // Create promise for this request
         const requestPromise = (async () => {
             try {
-                return await processRecipeTest(brigadeDbId, recipeSteps, ANTHROPIC_API_KEY);
+                return await processRecipeTest(brigadeDbId, recipeSteps, OPENROUTER_API_KEY);
             } finally {
                 // Clean up after 2 seconds
                 setTimeout(() => processingRequests.delete(requestKey), 2000);
@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
     }
 }
 
-async function processRecipeTest(brigadeDbId: string, recipeSteps: any[], anthropicApiKey: string): Promise<NextResponse> {
+async function processRecipeTest(brigadeDbId: string, recipeSteps: any[], openrouterApiKey: string): Promise<NextResponse> {
     try {
         const supabase = getSupabaseClient();
 
@@ -278,13 +278,14 @@ FORMAT DE SORTIE: Répondez UNIQUEMENT avec un objet JSON valide, aucun autre te
   "global_feedback": "résumé factuel global en français, max 200 caractères"
 }`;
 
-        const anthropic = new Anthropic({
-            apiKey: anthropicApiKey,
+        const openai = new OpenAI({
+            apiKey: openrouterApiKey,
+            baseURL: "https://openrouter.ai/api/v1",
             timeout: 55_000,
         });
 
-        const response = await anthropic.messages.create({
-            model: ANTHROPIC_MODEL,
+        const response = await openai.chat.completions.create({
+            model: OPENROUTER_MODEL,
             max_tokens: 2048,
             temperature: 0,  // Déterministe à 100% pour cohérence maximale
             messages: [{
@@ -293,7 +294,7 @@ FORMAT DE SORTIE: Répondez UNIQUEMENT avec un objet JSON valide, aucun autre te
             }]
         });
 
-        const text = response.content[0].type === 'text' ? response.content[0].text : "";
+        const text = response.choices[0]?.message?.content || "";
 
         // --- Parse AI response ---
         const extractJson = (raw: string): any => {

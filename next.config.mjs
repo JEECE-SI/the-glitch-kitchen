@@ -5,9 +5,6 @@ const nextConfig = {
     // Performance optimizations for 40+ concurrent users
     compress: true,
     
-    // Optimize production builds
-    swcMinify: true,
-    
     // Enable React strict mode for better error detection
     reactStrictMode: true,
     

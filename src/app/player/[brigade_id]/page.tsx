@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
-import { FileText, Database, Shield, Terminal, Activity, ListOrdered, Users, FlaskConical, Loader2, XCircle, Trophy, RotateCcw } from "lucide-react";
+import { FileText, Database, Shield, Terminal, Activity, ListOrdered, Users, FlaskConical, Loader2, XCircle, Trophy } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 
@@ -624,24 +624,6 @@ export default function PlayerDashboard() {
         }
     };
 
-    // Reset all test attempts for this brigade (dev/admin helper)
-    const handleResetTests = async () => {
-        if (!brigadeDbId) return;
-        if (!confirm('Réinitialiser les 3 essais de cette brigade ?')) return;
-        const { error } = await supabase
-            .from('recipe_tests')
-            .delete()
-            .eq('brigade_id', brigadeDbId);
-        if (error) {
-            alert('Erreur lors de la réinitialisation : ' + error.message);
-        } else {
-            setPreviousTests([]);
-            setTestAttempts(0);
-            setShowTestDetails(false);
-            setSelectedTestResult(null);
-            refreshRankings();
-        }
-    };
 
     const getScoreColor = (score: number) => {
         if (score >= 80) return 'text-green-400';
@@ -877,18 +859,6 @@ export default function PlayerDashboard() {
                                         <><FlaskConical className="w-3.5 h-3.5" /> TEST_RECIPE</>
                                     )}
                                 </Button>
-                                {testAttempts > 0 && (
-                                    <Button
-                                        onClick={handleResetTests}
-                                        variant="ghost"
-                                        size="sm"
-                                        className="font-mono text-xs h-9 gap-1.5 text-red-400/60 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20"
-                                        title="Réinitialiser les essais"
-                                    >
-                                        <RotateCcw className="w-3 h-3" />
-                                        RESET
-                                    </Button>
-                                )}
                             </div>
                         </div>
 
