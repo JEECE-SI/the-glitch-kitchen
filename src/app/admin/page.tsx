@@ -23,7 +23,6 @@ export default function AdminDashboard() {
     const [staffList, setStaffList] = useState<any[]>([]);
 
     const [catalogRoles, setCatalogRoles] = useState<any[]>([]);
-    const [catalogMissions, setCatalogMissions] = useState<any[]>([]);
     const [catalogContests, setCatalogContests] = useState<any[]>([]);
 
     const [isGameDialogOpen, setIsGameDialogOpen] = useState(false);
@@ -60,7 +59,6 @@ export default function AdminDashboard() {
         fetchPlayers();
         fetchStaff();
         fetchCatalogRoles();
-        fetchCatalogMissions();
         fetchCatalogContests();
 
         // Optional realtime updates
@@ -119,10 +117,6 @@ export default function AdminDashboard() {
         const { data } = await supabase.from('catalog_roles').select('*').order('created_at', { ascending: false });
         if (data) setCatalogRoles(data);
     };
-    const fetchCatalogMissions = async () => {
-        const { data } = await supabase.from('catalog_missions').select('*').order('created_at', { ascending: false });
-        if (data) setCatalogMissions(data);
-    };
     const fetchCatalogContests = async () => {
         const { data } = await supabase.from('catalog_contests').select('*').order('created_at', { ascending: false });
         if (data) setCatalogContests(data);
@@ -143,13 +137,6 @@ export default function AdminDashboard() {
         fetchCatalogRoles();
     };
 
-    const [newMission, setNewMission] = useState({ title: "", description: "" });
-    const createMission = async () => {
-        if (!newMission.title) return;
-        await supabase.from('catalog_missions').insert(newMission);
-        setNewMission({ title: "", description: "" });
-        fetchCatalogMissions();
-    };
 
     const [newContest, setNewContest] = useState({ title: "", description: "" });
     const createContest = async () => {
@@ -769,6 +756,7 @@ export default function AdminDashboard() {
             if (bIds.length > 0) {
                 await supabase.from('inventory').update({ fragment_data: null }).in('brigade_id', bIds);
                 await supabase.from('recipe_notes').delete().in('brigade_id', bIds);
+                await supabase.from('recipe_tests').delete().in('brigade_id', bIds);
                 await supabase.from('players').update({ role_used: false }).in('brigade_id', bIds);
             }
 
@@ -820,9 +808,6 @@ export default function AdminDashboard() {
                         </TabsTrigger>
                         <TabsTrigger value="roles" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
                             <Database className="w-4 h-4 mr-3" /> CATALOG_ROLES
-                        </TabsTrigger>
-                        <TabsTrigger value="missions" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
-                            <Database className="w-4 h-4 mr-3" /> CATALOG_MISSIONS
                         </TabsTrigger>
                         <TabsTrigger value="contests" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
                             <Database className="w-4 h-4 mr-3" /> CATALOG_CONTESTS
@@ -1345,49 +1330,6 @@ export default function AdminDashboard() {
                                                 <TableCell className="text-sm text-muted-foreground">{r.description}</TableCell>
                                                 <TableCell>
                                                     <Button variant="ghost" size="icon" onClick={() => deleteCatalogItem('catalog_roles', r.id, fetchCatalogRoles)} className="hover:text-destructive"><Trash2 className="w-4 h-4" /></Button>
-                                                </TableCell>
-                                            </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
-                            </CardContent>
-                        </Card>
-                    </TabsContent>
-
-                    {/* MISSIONS TAB */}
-                    <TabsContent value="missions" className="mt-0 space-y-6">
-                        <div className="flex justify-between items-center bg-background z-10 sticky top-0 py-2">
-                            <div>
-                                <h2 className="text-2xl font-bold font-mono text-white">Missions Catalog</h2>
-                                <p className="text-muted-foreground text-sm">Define global missions.</p>
-                            </div>
-                        </div>
-
-                        <Card className="glass-panel border-white/10 p-4 space-y-4">
-                            <div className="flex gap-4">
-                                <Input placeholder="Mission Title" value={newMission.title} onChange={e => setNewMission({ ...newMission, title: e.target.value })} className="bg-white/5 font-mono w-1/4" />
-                                <Input placeholder="Description" value={newMission.description} onChange={e => setNewMission({ ...newMission, description: e.target.value })} className="flex-1 bg-white/5 font-mono" />
-                                <Button onClick={createMission} className="font-mono bg-primary">ADD</Button>
-                            </div>
-                        </Card>
-
-                        <Card className="glass-panel border-white/10 bg-background/50">
-                            <CardContent className="p-0">
-                                <Table>
-                                    <TableHeader className="bg-white/5">
-                                        <TableRow className="border-white/10">
-                                            <TableHead className="font-mono text-primary w-1/3">TITLE</TableHead>
-                                            <TableHead className="font-mono text-primary flex-1">DESCRIPTION</TableHead>
-                                            <TableHead className="font-mono text-primary w-16"></TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {catalogMissions.map((m) => (
-                                            <TableRow key={m.id} className="border-white/10">
-                                                <TableCell className="font-bold">{m.title}</TableCell>
-                                                <TableCell className="text-sm text-muted-foreground">{m.description}</TableCell>
-                                                <TableCell>
-                                                    <Button variant="ghost" size="icon" onClick={() => deleteCatalogItem('catalog_missions', m.id, fetchCatalogMissions)} className="hover:text-destructive"><Trash2 className="w-4 h-4" /></Button>
                                                 </TableCell>
                                             </TableRow>
                                         ))}
