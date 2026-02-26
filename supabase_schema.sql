@@ -22,7 +22,24 @@ CREATE TABLE IF NOT EXISTS public.brigades (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );
 
--- 2.5 Table des Joueurs (Players)
+-- 2.5 Table Staff (Game Masters)
+CREATE TABLE IF NOT EXISTS public.staff (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    game_id UUID REFERENCES public.games(id) ON DELETE CASCADE,
+    code VARCHAR(10) UNIQUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+-- 2.6 Table Recipe Tests (for scoring)
+CREATE TABLE IF NOT EXISTS public.recipe_tests (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    brigade_id UUID REFERENCES public.brigades(id) ON DELETE CASCADE,
+    global_score INTEGER DEFAULT 0,
+    details JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+-- 2.7 Table des Joueurs (Players)
 CREATE TABLE IF NOT EXISTS public.players (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     brigade_id UUID REFERENCES public.brigades(id) ON DELETE CASCADE,
@@ -91,6 +108,8 @@ ALTER TABLE public.inventory ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.catalog_roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.catalog_missions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.catalog_contests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.staff ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.recipe_tests ENABLE ROW LEVEL SECURITY;
 
 -- Pour l'instant on ouvre tout (à durcir si vous implémentez l'auth Supabase plus tard, 
 -- mais pour une partie locale/entre amis les accès ouverts suffisent souvent)
@@ -102,7 +121,8 @@ CREATE POLICY "Allow public read/write access" ON public.inventory FOR ALL USING
 CREATE POLICY "Allow public read/write access" ON public.catalog_roles FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read/write access" ON public.catalog_missions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read/write access" ON public.catalog_contests FOR ALL USING (true) WITH CHECK (true);
-
+CREATE POLICY "Allow public read/write access" ON public.staff FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public read/write access" ON public.recipe_tests FOR ALL USING (true) WITH CHECK (true);
 
 -- ==========================================
 -- FONCTIONS ET TRIGGERS
@@ -135,7 +155,6 @@ CREATE TRIGGER on_brigade_created
   AFTER INSERT ON public.brigades
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_brigade();
 
-
 -- ==========================================
 -- REALTIME SUBSCRIPTIONS
 -- Autorise Next.js à s'abonner aux changements des tables
@@ -155,6 +174,8 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.inventory;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.catalog_roles;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.catalog_missions;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.catalog_contests;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.staff;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.recipe_tests;
 
 -- ===============================
 -- CATALOG TABLES
@@ -294,4 +315,71 @@ BEGIN
         ALTER PUBLICATION supabase_realtime ADD TABLE public.game_logs;
     EXCEPTION WHEN undefined_object OR duplicate_object THEN
     END;
+    
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.staff;
+    EXCEPTION WHEN undefined_object OR duplicate_object THEN
+    END;
+    
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.recipe_tests;
+    EXCEPTION WHEN undefined_object OR duplicate_object THEN
+    END;
 END $$;
+
+-- ==========================================
+-- PERFORMANCE OPTIMIZATION INDEXES
+-- Critical for 40+ concurrent users
+-- ==========================================
+
+-- Index on brigades.game_id (used in all brigade queries)
+CREATE INDEX IF NOT EXISTS idx_brigades_game_id ON public.brigades(game_id);
+
+-- Index on brigades.code for login lookups
+CREATE INDEX IF NOT EXISTS idx_brigades_code ON public.brigades(code);
+
+-- Index on players.brigade_id (used to load players per brigade)
+CREATE INDEX IF NOT EXISTS idx_players_brigade_id ON public.players(brigade_id);
+
+-- Index on inventory.brigade_id (used in realtime updates)
+CREATE INDEX IF NOT EXISTS idx_inventory_brigade_id ON public.inventory(brigade_id);
+
+-- Composite index on inventory for slot queries
+CREATE INDEX IF NOT EXISTS idx_inventory_brigade_slot ON public.inventory(brigade_id, slot_index);
+
+-- Index on recipe_notes.brigade_id (used to load recipe notes)
+CREATE INDEX IF NOT EXISTS idx_recipe_notes_brigade_id ON public.recipe_notes(brigade_id);
+
+-- Composite index on recipe_notes for step queries
+CREATE INDEX IF NOT EXISTS idx_recipe_notes_brigade_step ON public.recipe_notes(brigade_id, step_index);
+
+-- Index on game_logs.game_id (used for event feed)
+CREATE INDEX IF NOT EXISTS idx_game_logs_game_id ON public.game_logs(game_id);
+
+-- Index on game_logs.created_at for chronological queries
+CREATE INDEX IF NOT EXISTS idx_game_logs_created_at ON public.game_logs(created_at DESC);
+
+-- Composite index on game_logs for filtered queries
+CREATE INDEX IF NOT EXISTS idx_game_logs_game_created ON public.game_logs(game_id, created_at DESC);
+
+-- Index on recipe_tests.brigade_id (used for rankings)
+CREATE INDEX IF NOT EXISTS idx_recipe_tests_brigade_id ON public.recipe_tests(brigade_id);
+
+-- Composite index on recipe_tests for best score queries
+CREATE INDEX IF NOT EXISTS idx_recipe_tests_brigade_score ON public.recipe_tests(brigade_id, global_score DESC);
+
+-- Index on staff.game_id (used to fetch staff code)
+CREATE INDEX IF NOT EXISTS idx_staff_game_id ON public.staff(game_id);
+
+-- Index on catalog_fragments.fragment_id for decrypt lookups
+CREATE INDEX IF NOT EXISTS idx_catalog_fragments_fragment_id ON public.catalog_fragments(fragment_id);
+
+-- Analyze tables to update statistics for query optimization
+ANALYZE public.brigades;
+ANALYZE public.players;
+ANALYZE public.inventory;
+ANALYZE public.recipe_notes;
+ANALYZE public.game_logs;
+ANALYZE public.recipe_tests;
+ANALYZE public.staff;
+ANALYZE public.catalog_fragments;

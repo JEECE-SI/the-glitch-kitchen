@@ -42,8 +42,15 @@ export default function AdminDashboard() {
     const [massGameCount, setMassGameCount] = useState(2);
     const [massBrigadeCount, setMassBrigadeCount] = useState(5);
     const [isMassDeploying, setIsMassDeploying] = useState(false);
-    // massPlayers holds the list of players to be distributed: { name, poste }
-    const [massPlayers, setMassPlayers] = useState<{ name: string; poste: string }[]>([]);
+    // massPlayers holds the list of players to be distributed: { name, poste, pool, brigade, email, junior }
+    const [massPlayers, setMassPlayers] = useState<{ 
+        name: string; 
+        poste: string;
+        pool?: number;
+        brigade?: number;
+        email?: string;
+        junior?: string;
+    }[]>([]);
     const [massManualText, setMassManualText] = useState(""); // manual input: "Prenom Nom,Poste" per line
     const [massExcelFileName, setMassExcelFileName] = useState("");
 
@@ -237,13 +244,45 @@ export default function AdminDashboard() {
             const wb = XLSX.read(bstr, { type: 'binary' });
             const ws = wb.Sheets[wb.SheetNames[0]];
             const data = XLSX.utils.sheet_to_json(ws);
-            const parsed: { name: string; poste: string }[] = [];
+            const parsed: { 
+                name: string; 
+                poste: string;
+                pool?: number;
+                brigade?: number;
+                email?: string;
+                junior?: string;
+            }[] = [];
             data.forEach((row: any) => {
                 const nom = row['Nom'] || row['nom'] || row['NOM'] || '';
                 const prenom = row['Prénom'] || row['Prenom'] || row['prenom'] || row['PRENOM'] || '';
-                const poste = row['Poste'] || row['poste'] || row['POSTE'] || row['JE'] || row['je'] || '';
+                const poste = row['Poste'] || row['poste'] || row['POSTE'] || row['role'] || row['Role'] || row['ROLE'] || row['Rôle'] || row['JE'] || row['je'] || '';
+                const email = row['email'] || row['Email'] || row['EMAIL'] || '';
+                const junior = row['junior'] || row['Junior'] || row['JUNIOR'] || '';
+                const poolStr = String(row['pool'] || row['Pool'] || row['POOL'] || '');
+                const brigadeStr = String(row['brigade'] || row['Brigade'] || row['BRIGADE'] || '');
+                
                 const fullName = `${prenom} ${nom}`.trim();
-                if (fullName) parsed.push({ name: fullName, poste: String(poste).trim() });
+                if (fullName) {
+                    const player: any = { 
+                        name: fullName, 
+                        poste: String(poste).trim() 
+                    };
+                    
+                    if (poolStr && !isNaN(parseInt(poolStr))) {
+                        player.pool = parseInt(poolStr);
+                    }
+                    if (brigadeStr && !isNaN(parseInt(brigadeStr))) {
+                        player.brigade = parseInt(brigadeStr);
+                    }
+                    if (email) {
+                        player.email = email;
+                    }
+                    if (junior) {
+                        player.junior = junior;
+                    }
+                    
+                    parsed.push(player);
+                }
             });
             if (parsed.length > 0) {
                 setMassPlayers(prev => {
@@ -260,11 +299,27 @@ export default function AdminDashboard() {
 
     const handleMassManualAdd = () => {
         const lines = massManualText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-        const parsed: { name: string; poste: string }[] = lines.map(line => {
-            const parts = line.split(',');
-            const name = (parts[0] || '').trim();
-            const poste = (parts[1] || '').trim();
-            return { name, poste };
+        const parsed: { 
+            name: string; 
+            poste: string;
+            pool?: number;
+            brigade?: number;
+        }[] = lines.map(line => {
+            const parts = line.split(',').map(p => p.trim());
+            const name = parts[0] || '';
+            const poste = parts[1] || '';
+            const poolStr = parts[2] || '';
+            const brigadeStr = parts[3] || '';
+            
+            const player: any = { name, poste };
+            if (poolStr && !isNaN(parseInt(poolStr))) {
+                player.pool = parseInt(poolStr);
+            }
+            if (brigadeStr && !isNaN(parseInt(brigadeStr))) {
+                player.brigade = parseInt(brigadeStr);
+            }
+            
+            return player;
         }).filter(p => p.name.length > 0);
         if (parsed.length > 0) {
             setMassPlayers(prev => {
@@ -422,8 +477,56 @@ export default function AdminDashboard() {
                 if (staffError) throw staffError;
             }
 
-            // 4. Smart Distribute Players across ALL new brigades
-            const playersToInsert = smartDistribute(massPlayers, allNewBrigades, ROLES);
+            // 4. Distribute Players based on pool/brigade or smart distribution
+            let playersToInsert: any[] = [];
+            
+            // Check if players have pool/brigade assignments
+            const hasPoolBrigadeInfo = massPlayers.some(p => p.pool !== undefined && p.brigade !== undefined);
+            
+            if (hasPoolBrigadeInfo) {
+                // Group players by pool and brigade
+                const playersByPoolBrigade = new Map<string, typeof massPlayers>();
+                massPlayers.forEach(player => {
+                    const pool = player.pool || 1;
+                    const brigade = player.brigade || 1;
+                    const key = `${pool}-${brigade}`;
+                    if (!playersByPoolBrigade.has(key)) {
+                        playersByPoolBrigade.set(key, []);
+                    }
+                    playersByPoolBrigade.get(key)!.push(player);
+                });
+
+                // Assign each pool-brigade group to a game brigade
+                let brigadeIndex = 0;
+                playersByPoolBrigade.forEach((players, key) => {
+                    const targetBrigade = allNewBrigades[brigadeIndex % allNewBrigades.length];
+                    brigadeIndex++;
+
+                    // Track roles used in this brigade
+                    const rolesUsed = new Set<string>();
+
+                    players.forEach(player => {
+                        let assignedRole = player.poste || null;
+                        
+                        // If role is already used in this brigade, assign a different one
+                        if (assignedRole && rolesUsed.has(assignedRole)) {
+                            const availableRoles = ROLES.filter(r => !rolesUsed.has(r));
+                            assignedRole = availableRoles.length > 0 ? availableRoles[0] : null;
+                        }
+                        
+                        if (assignedRole) rolesUsed.add(assignedRole);
+
+                        playersToInsert.push({
+                            brigade_id: targetBrigade.id,
+                            name: player.name,
+                            role: assignedRole
+                        });
+                    });
+                });
+            } else {
+                // Fallback to smart distribution if no pool/brigade info
+                playersToInsert = smartDistribute(massPlayers, allNewBrigades, ROLES);
+            }
 
             const { error: playerError } = await supabase.from('players').insert(playersToInsert);
             if (playerError) throw playerError;
@@ -481,7 +584,14 @@ export default function AdminDashboard() {
     const [playersListText, setPlayersListText] = useState(""); // Keeping this just in case, though unused now in UI
     const [importGameId, setImportGameId] = useState("");
     const [isImporting, setIsImporting] = useState(false);
-    const [importedNames, setImportedNames] = useState<string[]>([]);
+    const [importedPlayers, setImportedPlayers] = useState<{
+        name: string;
+        email?: string;
+        junior?: string;
+        pool: number;
+        brigade: number;
+        role: string;
+    }[]>([]);
     const [importFileName, setImportFileName] = useState("");
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -498,25 +608,41 @@ export default function AdminDashboard() {
             const ws = wb.Sheets[wsname];
             const data = XLSX.utils.sheet_to_json(ws);
 
-            const names: string[] = [];
+            const players: {
+                name: string;
+                email?: string;
+                junior?: string;
+                pool: number;
+                brigade: number;
+                role: string;
+            }[] = [];
+            
             data.forEach((row: any) => {
-                // Ensure field names are case-insensitive or close enough, user requested "Nom Prénom JE et Poste"
-                // Let's look for combinations of Nom/Prenom
-                const nomInfo = row['Nom'] || row['nom'] || row['NOM'];
-                const prenomInfo = row['Prénom'] || row['Prenom'] || row['prenom'] || row['PRENOM'];
+                const nom = row['nom'] || row['Nom'] || row['NOM'] || '';
+                const prenom = row['prenom'] || row['Prenom'] || row['Prénom'] || row['PRENOM'] || '';
+                const email = row['email'] || row['Email'] || row['EMAIL'] || '';
+                const junior = row['junior'] || row['Junior'] || row['JUNIOR'] || '';
+                const pool = parseInt(String(row['pool'] || row['Pool'] || row['POOL'] || '1'));
+                const brigade = parseInt(String(row['brigade'] || row['Brigade'] || row['BRIGADE'] || '1'));
+                const role = row['role'] || row['Role'] || row['ROLE'] || row['Rôle'] || '';
 
-                if (nomInfo || prenomInfo) {
-                    const fullName = `${prenomInfo || ''} ${nomInfo || ''}`.trim();
-                    if (fullName) {
-                        names.push(fullName);
-                    }
+                const fullName = `${prenom} ${nom}`.trim();
+                if (fullName && !isNaN(pool) && !isNaN(brigade)) {
+                    players.push({
+                        name: fullName,
+                        email: email || undefined,
+                        junior: junior || undefined,
+                        pool,
+                        brigade,
+                        role: String(role).trim()
+                    });
                 }
             });
 
-            if (names.length > 0) {
-                setImportedNames(names);
+            if (players.length > 0) {
+                setImportedPlayers(players);
             } else {
-                alert("Aucun nom trouvé dans le fichier. Assurez-vous d'avoir des colonnes 'Nom' et 'Prénom'.");
+                alert("Aucun joueur trouvé dans le fichier. Assurez-vous d'avoir les colonnes 'prenom', 'nom', 'pool', 'brigade', et 'role'.");
             }
         };
         reader.readAsBinaryString(file);
@@ -524,41 +650,63 @@ export default function AdminDashboard() {
 
 
     const importAndDistributePlayers = async () => {
-        if (importedNames.length === 0 || !importGameId) return;
+        if (importedPlayers.length === 0 || !importGameId) return;
         setIsImporting(true);
         try {
-            const names = importedNames;
-
             // Get game brigades
             const gameBrigades = brigades.filter(b => b.game_id === importGameId);
             if (gameBrigades.length === 0) throw new Error("This game has no brigades.");
 
+            // Group players by pool and brigade
+            const playersByPoolBrigade = new Map<string, typeof importedPlayers>();
+            importedPlayers.forEach(player => {
+                const key = `${player.pool}-${player.brigade}`;
+                if (!playersByPoolBrigade.has(key)) {
+                    playersByPoolBrigade.set(key, []);
+                }
+                playersByPoolBrigade.get(key)!.push(player);
+            });
+
             const playersToInsert: any[] = [];
+            const brigadesByPoolBrigade = new Map<string, string>();
 
-            // Randomize names array
-            const shuffledNames = [...names].sort(() => 0.5 - Math.random());
+            // For each pool-brigade combination, assign to a game brigade
+            let brigadeIndex = 0;
+            playersByPoolBrigade.forEach((players, key) => {
+                const targetBrigade = gameBrigades[brigadeIndex % gameBrigades.length];
+                brigadesByPoolBrigade.set(key, targetBrigade.id);
+                brigadeIndex++;
 
-            // Distribute and assign roles
-            shuffledNames.forEach((name, i) => {
-                const brigadeIndex = i % gameBrigades.length;
-                const roleIndex = Math.floor(i / gameBrigades.length);
-                const role = roleIndex < ROLES.length ? ROLES[roleIndex] : null;
+                // Track roles used in this brigade
+                const rolesUsed = new Set<string>();
 
-                playersToInsert.push({
-                    brigade_id: gameBrigades[brigadeIndex].id,
-                    name: name,
-                    role: role
+                players.forEach(player => {
+                    let assignedRole = player.role || null;
+                    
+                    // If role is already used in this brigade, assign a different one
+                    if (assignedRole && rolesUsed.has(assignedRole)) {
+                        const availableRoles = ROLES.filter(r => !rolesUsed.has(r));
+                        assignedRole = availableRoles.length > 0 ? availableRoles[0] : null;
+                    }
+                    
+                    if (assignedRole) rolesUsed.add(assignedRole);
+
+                    playersToInsert.push({
+                        brigade_id: targetBrigade.id,
+                        name: player.name,
+                        role: assignedRole
+                    });
                 });
             });
 
             const { error } = await supabase.from('players').insert(playersToInsert);
             if (error) throw error;
 
-            setImportedNames([]);
+            setImportedPlayers([]);
             setImportFileName("");
             setIsPlayerImportOpen(false);
             fetchPlayers();
-            alert(`Succès! ${playersToInsert.length} joueurs répartis dans ${gameBrigades.length} brigades.`);
+            alert(`Succès! ${playersToInsert.length} joueurs répartis dans ${brigadesByPoolBrigade.size} brigades (${playersByPoolBrigade.size} pools).`);
         } catch (error: any) {
             console.error(error);
             alert("Erreur d'import : " + error.message);
@@ -828,7 +976,7 @@ export default function AdminDashboard() {
 
                                                 {/* Excel import */}
                                                 <div className="grid gap-1">
-                                                    <Label className="font-mono text-xs text-muted-foreground">IMPORT_EXCEL (.xlsx — colonnes: Nom, Prénom, Poste)</Label>
+                                                    <Label className="font-mono text-xs text-muted-foreground">IMPORT_EXCEL (.xlsx — colonnes: prenom, nom, email, junior, pool, brigade, role)</Label>
                                                     <Input
                                                         type="file"
                                                         accept=".xlsx,.xls"
@@ -840,10 +988,10 @@ export default function AdminDashboard() {
 
                                                 {/* Manual input */}
                                                 <div className="grid gap-1">
-                                                    <Label className="font-mono text-xs text-muted-foreground">SAISIE_MANUELLE (Prénom Nom, Poste — 1 par ligne)</Label>
+                                                    <Label className="font-mono text-xs text-muted-foreground">SAISIE_MANUELLE (Prénom Nom, Poste, Pool, Brigade — 1 par ligne)</Label>
                                                     <textarea
                                                         className="flex min-h-[80px] w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary font-mono"
-                                                        placeholder={"Jean Dupont, Cuisinier\nMarie Martin, Serveur"}
+                                                        placeholder={"Jean Dupont, Le Chef, 1, 1\nMarie Martin, Le Filet, 1, 2"}
                                                         value={massManualText}
                                                         onChange={(e) => setMassManualText(e.target.value)}
                                                     />
@@ -863,8 +1011,11 @@ export default function AdminDashboard() {
                                                     <div className="max-h-[120px] overflow-y-auto rounded border border-white/5 bg-white/5 p-2">
                                                         {massPlayers.map((p, i) => (
                                                             <div key={i} className="flex items-center justify-between text-xs font-mono py-0.5">
-                                                                <span>{p.name}</span>
+                                                                <span className="flex-1">{p.name}</span>
                                                                 <span className="text-muted-foreground ml-2">{p.poste || '—'}</span>
+                                                                {(p.pool !== undefined || p.brigade !== undefined) && (
+                                                                    <span className="text-primary ml-2">P{p.pool || '?'}/B{p.brigade || '?'}</span>
+                                                                )}
                                                                 <button className="ml-2 text-destructive hover:opacity-80" onClick={() => setMassPlayers(prev => prev.filter((_, j) => j !== i))}>✕</button>
                                                             </div>
                                                         ))}
@@ -1092,14 +1243,14 @@ export default function AdminDashboard() {
                                                         className="bg-white/5 border-white/10 font-mono text-xs cursor-pointer"
                                                     />
                                                 </div>
-                                                {importFileName && <p className="text-xs text-muted-foreground mt-1">Fichier sélectionné : {importFileName} ({importedNames.length} joueurs trouvés)</p>}
-                                                <p className="text-xs text-muted-foreground mt-1 text-primary">Le fichier doit contenir les colonnes 'Nom' et 'Prénom'.</p>
+                                                {importFileName && <p className="text-xs text-muted-foreground mt-1">Fichier sélectionné : {importFileName} ({importedPlayers.length} joueurs trouvés)</p>}
+                                                <p className="text-xs text-muted-foreground mt-1 text-primary">Le fichier doit contenir les colonnes 'prenom', 'nom', 'pool', 'brigade', et 'role'.</p>
                                             </div>
                                         </div>
                                         <DialogFooter>
                                             <Button
                                                 onClick={importAndDistributePlayers}
-                                                disabled={isImporting || importedNames.length === 0 || !importGameId}
+                                                disabled={isImporting || importedPlayers.length === 0 || !importGameId}
                                                 className="font-mono bg-secondary hover:bg-secondary/80 text-secondary-foreground w-full"
                                             >
                                                 {isImporting ? "PROCESSING..." : "DISTRIBUTE_ROLES"}

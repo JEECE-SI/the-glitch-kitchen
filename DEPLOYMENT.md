@@ -1,73 +1,155 @@
-# Deployment Guide - The Glitch Kitchen
+# 🎮 The Glitch Kitchen - Guide de Déploiement Complet
 
-## Prerequisites
+## 📋 Table des matières
 
-- Docker and Docker Compose installed on your VPS
-- Supabase account with database configured
-- API keys for Gemini and/or OpenAI
+1. [Prérequis](#prérequis)
+2. [Configuration de la base de données](#configuration-de-la-base-de-données)
+3. [Variables d'environnement](#variables-denvironnement)
+4. [Déploiement avec Docker](#déploiement-avec-docker)
+5. [Configuration Nginx (optionnel)](#configuration-nginx-optionnel)
+6. [Initialisation du jeu](#initialisation-du-jeu)
+7. [Mise à jour](#mise-à-jour)
+8. [Dépannage](#dépannage)
+9. [Sécurité et optimisation](#sécurité-et-optimisation)
 
-## Database Setup
+---
 
-1. **Create a Supabase project** at https://supabase.com
+## Prérequis
 
-2. **Run the database schema**:
-   - Go to your Supabase project dashboard
-   - Navigate to SQL Editor
-   - Copy and paste the entire content of `supabase_schema.sql`
-   - Execute the SQL script
+### Infrastructure
+- **VPS ou serveur** avec au minimum :
+  - 2 CPU cores
+  - 4 GB RAM
+  - 20 GB stockage
+  - Ubuntu 20.04+ ou Debian 11+
 
-3. **Verify tables are created**:
-   - Check that all tables exist: `games`, `brigades`, `players`, `recipe_notes`, `inventory`, `catalog_roles`, `catalog_missions`, `catalog_contests`, `catalog_recipe`, `catalog_fragments`, `game_logs`
+### Logiciels requis
+- **Docker** (version 20.10+)
+- **Docker Compose** (version 2.0+)
+- **Git**
 
-## Environment Variables
+### Services externes
+- **Compte Supabase** (gratuit) - https://supabase.com
+- **Clé API Gemini** ou **OpenAI** (au moins une des deux)
 
-Create a `.env.local` file in the project root with the following variables:
+---
+
+## Configuration de la base de données
+
+### 1. Créer un projet Supabase
+
+1. Allez sur https://supabase.com et créez un compte
+2. Créez un nouveau projet
+3. Notez votre **Project URL** et **anon/public key**
+
+### 2. Exécuter le schéma SQL
+
+1. Dans votre projet Supabase, allez dans **SQL Editor**
+2. Copiez **l'intégralité** du fichier `supabase_schema.sql`
+3. Collez-le dans l'éditeur SQL
+4. Cliquez sur **Run** pour exécuter le script
+
+### 3. Vérifier les tables créées
+
+Le script crée automatiquement :
+
+**Tables principales :**
+- `games` - Parties de jeu
+- `brigades` - Équipes de joueurs
+- `staff` - Codes Game Master
+- `players` - Joueurs
+- `recipe_tests` - Scores des recettes
+
+**Tables de données :**
+- `recipe_notes` - Notes de recette (10 étapes par brigade)
+- `inventory` - Inventaire des fragments (15 slots par brigade)
+- `game_logs` - Logs des événements
+
+**Catalogues :**
+- `catalog_roles` - Rôles disponibles (8 rôles)
+- `catalog_missions` - Missions
+- `catalog_contests` - Contests
+- `catalog_recipe` - Recette de référence (10 étapes)
+- `catalog_fragments` - Fragments de recette (60+ fragments)
+
+**Index de performance :**
+- Tous les index nécessaires pour supporter 40+ utilisateurs simultanés sont créés automatiquement
+
+### 4. Activer Realtime (important)
+
+1. Dans Supabase, allez dans **Database** → **Replication**
+2. Activez la réplication pour toutes les tables listées ci-dessus
+3. Cela permet les mises à jour en temps réel dans le jeu
+
+---
+
+## Variables d'environnement
+
+Créez un fichier `.env.local` à la racine du projet :
 
 ```env
-# Supabase Configuration
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+# Configuration Supabase
+NEXT_PUBLIC_SUPABASE_URL=https://votre-projet.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=votre_cle_anon_publique
 
-# AI API Keys (at least one is required)
-GEMINI_API_KEY=your_gemini_api_key
-OPENAI_API_KEY=your_openai_api_key
+# Clés API IA (au moins une des deux est requise)
+GEMINI_API_KEY=votre_cle_gemini
+OPENAI_API_KEY=votre_cle_openai
 ```
 
-## Deployment with Docker
+### Obtenir les clés API
 
-### Option 1: Docker Compose (Recommended)
+**Gemini (recommandé - gratuit) :**
+1. Allez sur https://makersuite.google.com/app/apikey
+2. Créez une nouvelle clé API
+3. Copiez la clé dans `.env.local`
 
-1. **Clone the repository** on your VPS:
+**OpenAI (payant) :**
+1. Allez sur https://platform.openai.com/api-keys
+2. Créez une nouvelle clé API
+3. Copiez la clé dans `.env.local`
+
+⚠️ **Important** : Ne commitez JAMAIS le fichier `.env.local` dans Git !
+
+---
+
+## Déploiement avec Docker
+
+### Option 1: Docker Compose (Recommandé)
+
+1. **Cloner le dépôt** sur votre VPS :
 ```bash
-git clone <your-repo-url>
+git clone <url-de-votre-repo>
 cd the-glitch-kitchen
 ```
 
-2. **Create `.env.local`** file with your environment variables
+2. **Créer le fichier `.env.local`** avec vos variables d'environnement (voir section précédente)
 
-3. **Build and start the container**:
+3. **Construire et démarrer le conteneur** :
 ```bash
 docker-compose up -d --build
 ```
 
-4. **Check logs**:
+4. **Vérifier les logs** :
 ```bash
 docker-compose logs -f
 ```
 
-5. **Stop the application**:
+5. **Arrêter l'application** :
 ```bash
 docker-compose down
 ```
 
-### Option 2: Docker Only
+L'application sera accessible sur `http://votre-ip:3000`
 
-1. **Build the image**:
+### Option 2: Docker seul
+
+1. **Construire l'image** :
 ```bash
 docker build -t the-glitch-kitchen .
 ```
 
-2. **Run the container**:
+2. **Lancer le conteneur** :
 ```bash
 docker run -d \
   --name the-glitch-kitchen \
@@ -77,17 +159,22 @@ docker run -d \
   the-glitch-kitchen
 ```
 
-## Nginx Reverse Proxy (Optional but Recommended)
+---
 
-If you want to use a domain name and SSL:
+## Configuration Nginx (optionnel)
 
-1. **Install Nginx**:
+Pour utiliser un nom de domaine et SSL :
+
+### 1. Installer Nginx
+
 ```bash
 sudo apt update
 sudo apt install nginx
 ```
 
-2. **Create Nginx configuration** (`/etc/nginx/sites-available/glitch-kitchen`):
+### 2. Créer la configuration Nginx
+
+Créez le fichier `/etc/nginx/sites-available/glitch-kitchen` :
 ```nginx
 server {
     listen 80;
@@ -107,84 +194,235 @@ server {
 }
 ```
 
-3. **Enable the site**:
+### 3. Activer le site
+
 ```bash
 sudo ln -s /etc/nginx/sites-available/glitch-kitchen /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-4. **Install SSL with Certbot** (optional):
+### 4. Installer SSL avec Certbot
+
 ```bash
 sudo apt install certbot python3-certbot-nginx
-sudo certbot --nginx -d your-domain.com
+sudo certbot --nginx -d votre-domaine.com
 ```
 
-## Updating the Application
+Votre site sera accessible sur `https://votre-domaine.com`
 
-1. **Pull latest changes**:
+---
+
+## Initialisation du jeu
+
+### 1. Accéder à l'interface admin
+
+1. Ouvrez votre navigateur et allez sur `http://votre-domaine.com/admin`
+2. Vous accédez au panneau d'administration
+
+### 2. Initialiser le catalogue
+
+1. Dans l'onglet **CATALOG_ROLES**, cliquez sur **SEED_CATALOG**
+2. Cela crée automatiquement :
+   - 8 rôles avec leurs pouvoirs
+   - 12 contests
+
+### 3. Créer une partie
+
+**Option A : Partie simple**
+
+1. Dans l'onglet **GAMES_INSTANCES**, cliquez sur **NEW_GAME**
+2. Remplissez :
+   - **GAME_NAME** : Nom de votre événement
+   - **BRIGADE_COUNT** : Nombre d'équipes (ex: 10)
+   - **Durées des cycles** : Annonce (4 min), Contests (7 min), Temps libre (9 min)
+3. Cliquez sur **DEPLOY_INSTANCE**
+
+**Option B : Déploiement massif avec import Excel**
+
+1. Cliquez sur **MASS_DEPLOY**
+2. Configurez :
+   - **NAME_PREFIX** : Préfixe des parties (ex: "Session")
+   - **GAME_COUNT** : Nombre de parties à créer
+   - **BRIGADES_PER_GAME** : Brigades par partie
+3. Importez votre fichier Excel avec les colonnes :
+   - `prenom`, `nom`, `email`, `junior`, `pool`, `brigade`, `role`
+4. Cliquez sur **DEPLOY_ALL**
+
+### 4. Importer les joueurs
+
+1. Dans l'onglet **PLAYERS_MGMT**, cliquez sur **IMPORT_PLAYERS**
+2. Sélectionnez la partie cible
+3. Importez votre fichier Excel (colonnes : `prenom`, `nom`, `pool`, `brigade`, `role`)
+4. Cliquez sur **DISTRIBUTE_ROLES**
+
+**Les joueurs sont automatiquement répartis par pool/brigade !**
+
+### 5. Récupérer les codes de connexion
+
+**Codes brigades :**
+- Onglet **BRIGADES_MGMT** : liste tous les codes de connexion des brigades
+- Les joueurs utilisent ces codes sur la page d'accueil
+
+**Code Game Master :**
+- Visible dans l'onglet **GAMES_INSTANCES** (colonne STAFF CODE)
+- Utilisez ce code pour accéder au tableau de bord GM : `/gm/[game_id]`
+
+### 6. Lancer la partie
+
+1. Dans **GAMES_INSTANCES**, cliquez sur l'icône ▶️ (Play) pour passer le statut à **active**
+2. Les brigades peuvent maintenant jouer !
+
+---
+
+## Mise à jour
+
+### Mettre à jour l'application
+
 ```bash
+# 1. Récupérer les dernières modifications
 git pull origin main
-```
 
-2. **Rebuild and restart**:
-```bash
+# 2. Reconstruire et redémarrer
 docker-compose up -d --build
 ```
 
-## Troubleshooting
+### Sauvegarder la base de données
 
-### Check container status
+Les données sont dans Supabase, elles sont automatiquement sauvegardées. Vous pouvez exporter manuellement :
+
+1. Dans Supabase, allez dans **Database** → **Backups**
+2. Téléchargez une sauvegarde
+
+---
+
+## Dépannage
+
+### Problèmes courants
+
+**L'application ne démarre pas**
 ```bash
+# Vérifier le statut
 docker-compose ps
+
+# Voir les logs
+docker-compose logs -f
 ```
 
-### View logs
-```bash
-docker-compose logs -f app
-```
+**Erreur de connexion Supabase**
+- Vérifiez que `NEXT_PUBLIC_SUPABASE_URL` et `NEXT_PUBLIC_SUPABASE_ANON_KEY` sont corrects
+- Vérifiez que les tables sont créées dans Supabase
+- Vérifiez que Realtime est activé
 
-### Restart the application
+**Les mises à jour en temps réel ne fonctionnent pas**
+- Allez dans Supabase → Database → Replication
+- Activez la réplication pour toutes les tables
+
+**Erreur "No API key found"**
+- Vérifiez que `GEMINI_API_KEY` ou `OPENAI_API_KEY` est défini dans `.env.local`
+- Redémarrez le conteneur après modification : `docker-compose restart`
+
+### Commandes utiles
+
 ```bash
+# Redémarrer l'application
 docker-compose restart
-```
 
-### Remove and rebuild
-```bash
+# Voir les logs en temps réel
+docker-compose logs -f --tail=100
+
+# Reconstruire complètement
 docker-compose down
 docker-compose up -d --build
+
+# Voir l'utilisation des ressources
+docker stats the-glitch-kitchen
 ```
 
-## Security Recommendations
+---
 
-1. **Firewall**: Configure UFW to only allow necessary ports
+## Sécurité et optimisation
+
+### Sécurité
+
+**1. Configurer le pare-feu**
 ```bash
-sudo ufw allow 22/tcp
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
+sudo ufw allow 22/tcp   # SSH
+sudo ufw allow 80/tcp   # HTTP
+sudo ufw allow 443/tcp  # HTTPS
 sudo ufw enable
 ```
 
-2. **Environment Variables**: Never commit `.env.local` to version control
+**2. Protéger les variables d'environnement**
+- Ne commitez JAMAIS `.env.local` dans Git
+- Ajoutez `.env.local` dans `.gitignore` (déjà fait)
 
-3. **Supabase RLS**: Consider implementing Row Level Security policies for production
-
-4. **Regular Updates**: Keep Docker, Node.js, and dependencies up to date
-
-## Performance Optimization
-
-- Consider using a CDN for static assets
-- Enable Supabase connection pooling
-- Monitor resource usage with `docker stats`
-- Set up log rotation for Docker logs
-
-## Monitoring
-
-Monitor your application with:
+**3. Mises à jour régulières**
 ```bash
-# CPU and Memory usage
-docker stats the-glitch-kitchen
+# Mettre à jour le système
+sudo apt update && sudo apt upgrade -y
 
-# Application logs
+# Mettre à jour Docker
+sudo apt install docker-ce docker-ce-cli containerd.io
+```
+
+### Optimisation des performances
+
+**Pour 40+ utilisateurs simultanés :**
+
+1. **Index de base de données** : Déjà créés automatiquement par `supabase_schema.sql`
+
+2. **Connection pooling Supabase** :
+   - Dans Supabase → Settings → Database
+   - Activez "Connection pooling"
+   - Utilisez le mode "Transaction"
+
+3. **Monitoring des ressources** :
+```bash
+# Voir l'utilisation CPU/RAM
+docker stats
+
+# Logs avec rotation
 docker-compose logs -f --tail=100
 ```
+
+4. **Optimisation Docker** :
+   - Le Dockerfile utilise déjà le mode production
+   - Les dépendances sont optimisées
+   - Le cache est configuré
+
+### Monitoring
+
+**Surveiller l'application :**
+```bash
+# Utilisation des ressources
+docker stats the-glitch-kitchen
+
+# Logs en temps réel
+docker-compose logs -f
+
+# Statut des conteneurs
+docker-compose ps
+```
+
+**Métriques Supabase :**
+- Allez dans votre projet Supabase → Reports
+- Surveillez les requêtes, la latence, et l'utilisation
+
+---
+
+## 🎉 C'est prêt !
+
+Votre instance de **The Glitch Kitchen** est maintenant déployée et prête à accueillir vos joueurs !
+
+**Liens utiles :**
+- Page d'accueil : `https://votre-domaine.com`
+- Admin : `https://votre-domaine.com/admin`
+- Game Master : `https://votre-domaine.com/gm/[game_id]`
+- Staff : `https://votre-domaine.com/staff/[staff_code]`
+
+**Support :**
+- Documentation du jeu dans le README.md
+- Issues GitHub pour les bugs
+
+Bon jeu ! 🍳✨
