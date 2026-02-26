@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -498,7 +498,7 @@ export default function AdminDashboard() {
 
                 // Assign each pool-brigade group to a game brigade
                 let brigadeIndex = 0;
-                playersByPoolBrigade.forEach((players, key) => {
+                playersByPoolBrigade.forEach((players) => {
                     const targetBrigade = allNewBrigades[brigadeIndex % allNewBrigades.length];
                     brigadeIndex++;
 
@@ -581,7 +581,6 @@ export default function AdminDashboard() {
     const ROLES = catalogRoles.map(r => r.title);
 
     const [isPlayerImportOpen, setIsPlayerImportOpen] = useState(false);
-    const [playersListText, setPlayersListText] = useState(""); // Keeping this just in case, though unused now in UI
     const [importGameId, setImportGameId] = useState("");
     const [isImporting, setIsImporting] = useState(false);
     const [importedPlayers, setImportedPlayers] = useState<{

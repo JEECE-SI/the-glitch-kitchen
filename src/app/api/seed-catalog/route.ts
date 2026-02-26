@@ -1,11 +1,17 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Use service role to bypass RLS for seeding
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+// Lazy Supabase client initialization to avoid build-time errors
+function getSupabaseClient() {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseKey) {
+        throw new Error("Supabase configuration missing");
+    }
+    
+    return createClient(supabaseUrl, supabaseKey);
+}
 
 const ROLES = [
     {
@@ -147,6 +153,8 @@ const CONTESTS = [
 
 export async function POST() {
     try {
+        const supabase = getSupabaseClient();
+        
         // Clear existing roles and contests
         await supabase.from('catalog_roles').delete().neq('id', '00000000-0000-0000-0000-000000000000');
         await supabase.from('catalog_contests').delete().neq('id', '00000000-0000-0000-0000-000000000000');

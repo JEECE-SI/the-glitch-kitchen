@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Game, GamePhase, GameStatus, Brigade, Player, Contest, Fragment, BrigadeFragment } from '@/types/game';
+import { Game, Brigade, Player, Contest, Fragment, BrigadeFragment } from '@/types/game';
 
 interface GameState {
     game: Game | null;

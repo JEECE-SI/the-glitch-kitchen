@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
-import { Lock, FileText, Database, Shield, Zap, Terminal, Activity, ListOrdered, Users, FlaskConical, Loader2, Star, CheckCircle2, XCircle, ChevronDown, ChevronUp, Trophy, RotateCcw } from "lucide-react";
+import { FileText, Database, Shield, Terminal, Activity, ListOrdered, Users, FlaskConical, Loader2, XCircle, Trophy, RotateCcw } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 
@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 export default function PlayerDashboard() {
     const params = useParams();
     const brigadeId = params.brigade_id as string;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const [activeTab, setActiveTab] = useState("intel");
     const [players, setPlayers] = useState<any[]>([]);
     const [catalogRoles, setCatalogRoles] = useState<any[]>([]);
@@ -23,6 +24,7 @@ export default function PlayerDashboard() {
     const [gameId, setGameId] = useState<string | null>(null);
     const [brigadeName, setBrigadeName] = useState("");
     const [brigadeDbId, setBrigadeDbId] = useState("");
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const [staffCode, setStaffCode] = useState<string | null>(null);
 
     const [gameState, setGameState] = useState<any>(null);
@@ -285,7 +287,7 @@ export default function PlayerDashboard() {
                 event: '*', 
                 schema: 'public', 
                 table: 'recipe_tests' 
-            }, (payload) => {
+            }, () => {
                 // Debounce rankings refresh to avoid excessive recalculations
                 refreshRankings();
             })
@@ -334,7 +336,7 @@ export default function PlayerDashboard() {
                     setCycleTimer(timerData.timeLeft);
                     setGlobalTimer(timerData.globalTime || 0);
                 }
-            } catch (e) { }
+            } catch { }
         } else {
             setCycleTimer(0);
             setIsTimerRunning(false);

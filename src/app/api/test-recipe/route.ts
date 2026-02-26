@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
 import { rateLimit } from "@/lib/rateLimit";
 
@@ -11,13 +11,19 @@ export const maxDuration = 60;
 // In-memory cache to prevent duplicate concurrent requests
 const processingRequests = new Map<string, Promise<NextResponse>>();
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseKey);
+const ANTHROPIC_MODEL = "claude-3-5-haiku-20241022";
 
-const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
-const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+// Lazy Supabase client initialization to avoid build-time errors
+function getSupabaseClient() {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+    
+    if (!supabaseUrl || !supabaseKey) {
+        throw new Error("Supabase configuration missing");
+    }
+    
+    return createClient(supabaseUrl, supabaseKey);
+}
 
 // -------------------------------------------------------------------
 // Semantic level → bonus points (server-side, deterministic)
@@ -53,15 +59,16 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        if (!GROQ_API_KEY) {
+        const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+        if (!ANTHROPIC_API_KEY) {
             return NextResponse.json(
-                { error: "GROQ_API_KEY is not configured on the server." },
+                { error: "ANTHROPIC_API_KEY is not configured on the server." },
                 { status: 500 }
             );
         }
 
         const body = await req.json();
-        const { brigadeId, brigadeDbId, recipeSteps } = body;
+        const { brigadeDbId, recipeSteps } = body;
 
         if (!brigadeDbId || !recipeSteps || !Array.isArray(recipeSteps)) {
             return NextResponse.json(
@@ -80,7 +87,7 @@ export async function POST(req: NextRequest) {
         // Create promise for this request
         const requestPromise = (async () => {
             try {
-                return await processRecipeTest(brigadeDbId, recipeSteps);
+                return await processRecipeTest(brigadeDbId, recipeSteps, ANTHROPIC_API_KEY);
             } finally {
                 // Clean up after 2 seconds
                 setTimeout(() => processingRequests.delete(requestKey), 2000);
@@ -99,8 +106,9 @@ export async function POST(req: NextRequest) {
     }
 }
 
-async function processRecipeTest(brigadeDbId: string, recipeSteps: any[]): Promise<NextResponse> {
+async function processRecipeTest(brigadeDbId: string, recipeSteps: any[], anthropicApiKey: string): Promise<NextResponse> {
     try {
+        const supabase = getSupabaseClient();
 
         // --- Max attempts check ---
         const { data: existingTests, error: testsFetchError } = await supabase
@@ -199,39 +207,55 @@ async function processRecipeTest(brigadeDbId: string, recipeSteps: any[]): Promi
         });
 
         // -------------------------------------------------------------------
-        // PROMPT — plain ASCII only, no unicode box chars (avoids JSON 400 error)
-        // AI only picks semantic LABELS (not numbers) → eliminates numeric drift
+        // PROMPT OPTIMISÉ — Claude 3.5 Sonnet pour analyse ultra-précise
+        // AI choisit des LABELS sémantiques (pas de nombres) → élimine la dérive numérique
+        // Résultats cohérents et reproductibles avec température 0
         // -------------------------------------------------------------------
-        const prompt = `You are a culinary evaluation assistant. For each step and each field, pick ONE semantic label from this exact list: EXACT, PROCHE, PARTIEL, INDIRECT, AUCUN.
+        const prompt = `Vous êtes un assistant expert en évaluation culinaire. Votre mission est d'analyser chaque étape de recette avec une précision maximale.
 
-LABEL DEFINITIONS:
-- EXACT    : perfect synonym or identical meaning in culinary context (ex: "fouetter" = "battre", "sauteuse" = "poele")
-- PROCHE   : very close meaning, near-equivalent, same technique family (ex: "rissoler" ~ "revenir", "marmite" ~ "cocotte")
-- PARTIEL  : same broad culinary category but not equivalent (ex: "beurre" ~ "huile", "cuire" ~ "pocher")
-- INDIRECT : loosely related, same culinary universe but different (ex: "sel" ~ "epices", "couteau" ~ "moulin")
-- AUCUN    : no semantic link, or the brigade field is EMPTY
+Pour chaque étape et chaque champ (ingrédient, technique, outil), choisissez UN SEUL label sémantique parmi cette liste EXACTE:
+EXACT, PROCHE, PARTIEL, INDIRECT, AUCUN
 
-IMPORTANT RULES:
-- If the brigade field is empty ("") -> use AUCUN, no exceptions.
-- Each label choice must reflect the MEANING comparison, not the spelling. Spelling similarity is already computed separately.
-- Focus purely on culinary semantics.
+DÉFINITIONS DES LABELS (soyez rigoureux et cohérent):
 
-REFERENCE RECIPE (10 steps):
+• EXACT: Synonyme parfait ou signification identique dans le contexte culinaire
+  Exemples: "fouetter" = "battre", "sauteuse" = "poêle", "crème liquide" = "crème fraîche liquide"
+  
+• PROCHE: Signification très proche, quasi-équivalent, même famille de technique
+  Exemples: "rissoler" ≈ "revenir", "marmite" ≈ "cocotte", "hacher" ≈ "émincer finement"
+  
+• PARTIEL: Même grande catégorie culinaire mais pas équivalent
+  Exemples: "beurre" ~ "huile", "cuire" ~ "pocher", "couteau" ~ "hachoir"
+  
+• INDIRECT: Lien lointain, même univers culinaire mais différent
+  Exemples: "sel" ~ "épices", "four" ~ "plaque", "bouillir" ~ "mijoter"
+  
+• AUCUN: Aucun lien sémantique OU le champ de la brigade est VIDE
+  Exemples: "tomate" vs "chocolat", "" (vide), "mixer" vs "assiette"
+
+RÈGLES CRITIQUES:
+1. Si le champ de la brigade est vide ("") → TOUJOURS utiliser AUCUN, sans exception
+2. Chaque choix de label doit refléter la comparaison de SENS, pas l'orthographe
+3. L'orthographe/similarité lexicale est déjà calculée séparément par le système
+4. Concentrez-vous UNIQUEMENT sur la sémantique culinaire
+5. Soyez CONSTANT: même comparaison = même label, toujours
+
+RECETTE DE RÉFÉRENCE (10 étapes):
 ${realRecipeFormatted
                 .map((s: any) =>
-                    `Step ${s.step}: ingredient="${s.ingredient}" | technique="${s.technique}" | tool="${s.tool}"`
+                    `Étape ${s.step}: ingrédient="${s.ingredient}" | technique="${s.technique}" | outil="${s.tool}"`
                 )
                 .join("\n")}
 
-BRIGADE RECIPE (to evaluate):
+RECETTE DE LA BRIGADE (à évaluer):
 ${brigadeRecipeFormatted
                 .map((bs: any) => {
                     const rs = realRecipeFormatted.find((r: any) => r.step === bs.step) as any;
-                    return `Step ${bs.step}: ingredient="${bs.ingredient}" (ref: "${rs?.ingredient ?? ""}") | technique="${bs.technique}" (ref: "${rs?.technique ?? ""}") | tool="${bs.tool}" (ref: "${rs?.tool ?? ""}")`;
+                    return `Étape ${bs.step}: ingrédient="${bs.ingredient}" (réf: "${rs?.ingredient ?? ""}") | technique="${bs.technique}" (réf: "${rs?.technique ?? ""}") | outil="${bs.tool}" (réf: "${rs?.tool ?? ""}")`;
                 })
                 .join("\n")}
 
-OUTPUT FORMAT: respond ONLY with a valid JSON object, no other text:
+FORMAT DE SORTIE: Répondez UNIQUEMENT avec un objet JSON valide, aucun autre texte:
 {
   "steps": [
     {
@@ -239,7 +263,7 @@ OUTPUT FORMAT: respond ONLY with a valid JSON object, no other text:
       "ingredient_level": "AUCUN",
       "technique_level": "AUCUN",
       "tool_level": "AUCUN",
-      "feedback": "one factual sentence in French, max 80 chars"
+      "feedback": "une phrase factuelle en français, max 80 caractères"
     },
     { "step": 2, "ingredient_level": "AUCUN", "technique_level": "AUCUN", "tool_level": "AUCUN", "feedback": "" },
     { "step": 3, "ingredient_level": "AUCUN", "technique_level": "AUCUN", "tool_level": "AUCUN", "feedback": "" },
@@ -251,25 +275,25 @@ OUTPUT FORMAT: respond ONLY with a valid JSON object, no other text:
     { "step": 9, "ingredient_level": "AUCUN", "technique_level": "AUCUN", "tool_level": "AUCUN", "feedback": "" },
     { "step": 10, "ingredient_level": "AUCUN", "technique_level": "AUCUN", "tool_level": "AUCUN", "feedback": "" }
   ],
-  "global_feedback": "global factual summary in French, max 200 chars"
+  "global_feedback": "résumé factuel global en français, max 200 caractères"
 }`;
 
-        const openai = new OpenAI({
-            apiKey: GROQ_API_KEY,
-            baseURL: GROQ_BASE_URL,
+        const anthropic = new Anthropic({
+            apiKey: anthropicApiKey,
             timeout: 55_000,
         });
 
-        const response = await openai.chat.completions.create({
-            model: GROQ_MODEL,
-            messages: [{ role: "user", content: prompt }],
-            max_tokens: 1200,              // labels are short, 1200 is more than enough
-            temperature: 0,               // fully deterministic
-            seed: 42,
-            response_format: { type: "json_object" },
+        const response = await anthropic.messages.create({
+            model: ANTHROPIC_MODEL,
+            max_tokens: 2048,
+            temperature: 0,  // Déterministe à 100% pour cohérence maximale
+            messages: [{
+                role: "user",
+                content: prompt
+            }]
         });
 
-        const text = response.choices[0]?.message?.content || "";
+        const text = response.content[0].type === 'text' ? response.content[0].text : "";
 
         // --- Parse AI response ---
         const extractJson = (raw: string): any => {

@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Shield, Play, Pause, Timer, Settings2, Users, Activity, ChevronsRight, AlertTriangle, Trophy, CheckCircle2 } from "lucide-react";
+import { Shield, Play, Pause, Timer, Users, Activity, ChevronsRight, AlertTriangle, Trophy, CheckCircle2 } from "lucide-react";
 
 type GamePhase = 'setup' | 'annonce' | 'contests' | 'temps_libre' | 'finished';
 
@@ -303,7 +303,7 @@ export default function StaffDashboard() {
                     if (tc.contestAssignments) setContestAssignments(tc.contestAssignments);
                     if (tc.validatedContests) setValidatedContests(tc.validatedContests);
                 }
-            } catch (e) { }
+            } catch { }
         }
     }, [game?.active_contest]);
 
@@ -352,7 +352,7 @@ export default function StaffDashboard() {
         if (!assignments) return;
 
         let anyAssigned = false;
-        let winnersLog: string[] = [];
+        const winnersLog: string[] = [];
 
         for (const [pos, brigadeId] of Object.entries(assignments)) {
             if (!brigadeId || brigadeId === 'null') continue;
