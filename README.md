@@ -1,36 +1,132 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# The Glitch Kitchen 🍳
 
-## Getting Started
+A collaborative cooking game built with Next.js, Supabase, and AI-powered recipe testing.
 
-First, run the development server:
+## Overview
 
+The Glitch Kitchen is a multiplayer game where brigades (teams) work together to reconstruct a recipe by collecting and decoding fragments. The game features real-time collaboration, AI-powered recipe validation, and multiple game modes.
+
+## Tech Stack
+
+- **Frontend**: Next.js 14 (App Router), React, TypeScript
+- **Styling**: Tailwind CSS, shadcn/ui components
+- **Database**: Supabase (PostgreSQL with real-time subscriptions)
+- **AI**: Google Gemini / OpenAI for recipe testing
+- **State Management**: Zustand
+- **Deployment**: Docker, Docker Compose
+
+## Quick Start
+
+### Prerequisites
+
+- Node.js 20+
+- npm or yarn
+- Supabase account
+- Gemini or OpenAI API key
+
+### Installation
+
+1. **Clone the repository**:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone <your-repo-url>
+cd the-glitch-kitchen
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. **Install dependencies**:
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. **Set up environment variables**:
+   - Copy `.env.example` to `.env.local`
+   - Fill in your Supabase credentials and API keys
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. **Set up the database**:
+   - Create a Supabase project
+   - Run the SQL script from `supabase_schema.sql` in the Supabase SQL Editor
 
-## Learn More
+5. **Run the development server**:
+```bash
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+6. **Open** [http://localhost:3000](http://localhost:3000)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Project Structure
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+├── src/
+│   ├── app/              # Next.js app router pages
+│   │   ├── admin/        # Admin dashboard
+│   │   ├── gm/           # Game Master interface
+│   │   ├── player/       # Player interface
+│   │   ├── staff/        # Staff interface
+│   │   └── api/          # API routes
+│   ├── components/       # React components
+│   ├── lib/              # Utilities and Supabase client
+│   ├── hooks/            # Custom React hooks
+│   └── store/            # Zustand state management
+├── supabase_schema.sql   # Database schema
+├── Dockerfile            # Docker configuration
+├── docker-compose.yml    # Docker Compose setup
+└── DEPLOYMENT.md         # Deployment guide
+```
 
-## Deploy on Vercel
+## Features
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Real-time Collaboration**: Multiple players can work together in brigades
+- **AI Recipe Testing**: Automated recipe validation using AI
+- **Fragment System**: Collect and decode recipe fragments
+- **Multiple Roles**: Admin, Game Master, Staff, and Player interfaces
+- **Prestige Points**: Competitive ranking system
+- **Game Logs**: Track all game events and actions
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Development
+
+### Available Scripts
+
+- `npm run dev` - Start development server
+- `npm run build` - Build for production
+- `npm run start` - Start production server
+- `npm run lint` - Run ESLint
+
+### Database Schema
+
+The database includes:
+- `games` - Game sessions
+- `brigades` - Teams/groups
+- `players` - Individual players
+- `recipe_notes` - Recipe reconstruction progress
+- `inventory` - Fragment storage
+- `catalog_*` - Game content catalogs
+- `game_logs` - Event logging
+
+## Deployment
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions including:
+- Docker deployment
+- VPS setup
+- Nginx configuration
+- SSL setup
+- Environment configuration
+
+### Quick Deploy with Docker
+
+```bash
+docker-compose up -d --build
+```
+
+## Environment Variables
+
+Required environment variables (see `.env.example`):
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+GEMINI_API_KEY=your_gemini_api_key
+OPENAI_API_KEY=your_openai_api_key
+```
+
+## License
+
+MIT

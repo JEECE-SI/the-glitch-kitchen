@@ -33,6 +33,7 @@ export default function StaffDashboard() {
     const [phaseTimers, setPhaseTimers] = useState<{ [key: string]: number }>({});
     const [cycleContests, setCycleContests] = useState<Record<string, any[]>>({});
     const [contestAssignments, setContestAssignments] = useState<Record<string, Record<string, string>>>({});
+    const [validatedContests, setValidatedContests] = useState<Record<string, boolean>>({});
     const [catalogContests, setCatalogContests] = useState<any[]>([]);
 
     // Refs pour éviter les closures obsolètes dans les effets du timer
@@ -43,6 +44,7 @@ export default function StaffDashboard() {
     const globalTimerRef = useRef(0);
     const phaseTimersRef = useRef<{ [key: string]: number }>({});
     const contestAssignmentsRef = useRef<Record<string, Record<string, string>>>({});
+    const validatedContestsRef = useRef<Record<string, boolean>>({});
     const gameIdRef = useRef<string | null>(null);
     const gameSettingsRef = useRef<any>(null);
     // Flag pour bloquer la resync externe pendant une transition automatique
@@ -98,6 +100,9 @@ export default function StaffDashboard() {
                         if (tc.contestAssignments) {
                             setContestAssignments(tc.contestAssignments);
                         }
+                        if (tc.validatedContests) {
+                            setValidatedContests(tc.validatedContests);
+                        }
                     } catch (e) { console.error("Error parsing initial active_contest:", e); }
                 }
 
@@ -124,6 +129,7 @@ export default function StaffDashboard() {
     useEffect(() => { globalTimerRef.current = globalTimer; }, [globalTimer]);
     useEffect(() => { phaseTimersRef.current = phaseTimers; }, [phaseTimers]);
     useEffect(() => { contestAssignmentsRef.current = contestAssignments; }, [contestAssignments]);
+    useEffect(() => { validatedContestsRef.current = validatedContests; }, [validatedContests]);
     useEffect(() => { gameIdRef.current = gameId; }, [gameId]);
     useEffect(() => { gameSettingsRef.current = game?.settings; }, [game?.settings]);
 
@@ -157,6 +163,7 @@ export default function StaffDashboard() {
         const currentGlobalTimer = globalTimerRef.current;
         const currentPhaseTimers = phaseTimersRef.current;
         const currentContestAssignments = contestAssignmentsRef.current;
+        const currentValidatedContests = validatedContestsRef.current;
         const currentGameId = gameIdRef.current;
         const settings = gameSettingsRef.current;
         const M_TO_S = 60;
@@ -190,7 +197,7 @@ export default function StaffDashboard() {
         if (nextPhase === 'finished') {
             setCurrentPhase('finished');
             setTimerActive(false);
-            const syncData = JSON.stringify({ timeLeft: 0, globalTime: currentGlobalTimer, timerActive: false, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments: currentContestAssignments });
+            const syncData = JSON.stringify({ timeLeft: 0, globalTime: currentGlobalTimer, timerActive: false, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments: currentContestAssignments, validatedContests: currentValidatedContests });
             setGame((prev: any) => ({ ...prev, status: 'finished', active_contest: syncData }));
             await supabase.from('games').update({ status: 'finished', active_contest: syncData }).eq('id', currentGameId);
             await supabase.from('game_logs').insert({ game_id: currentGameId, event_type: 'game_finish', message: logMessage });
@@ -201,13 +208,16 @@ export default function StaffDashboard() {
         // Préparer la nouvelle phase
         let newPhaseTimers = { ...updatedPhaseTimers };
         let newContestAssignments = { ...currentContestAssignments };
+        let newValidatedContests = { ...currentValidatedContests };
         const cycleChanged = nextCycle !== cycle;
 
         if (cycleChanged) {
             newPhaseTimers = {};
             newContestAssignments = {};
+            newValidatedContests = {};
             setCurrentCycle(nextCycle);
             setContestAssignments({});
+            setValidatedContests({});
         }
 
         const defaultTime = nextPhase === 'annonce'
@@ -229,7 +239,7 @@ export default function StaffDashboard() {
         setTimerKey(k => k + 1);
         setTimerActive(true);
 
-        const syncData = JSON.stringify({ timeLeft: nextTime, globalTime: currentGlobalTimer, timerActive: true, updatedAt: Date.now(), phaseTimers: newPhaseTimers, contestAssignments: newContestAssignments });
+        const syncData = JSON.stringify({ timeLeft: nextTime, globalTime: currentGlobalTimer, timerActive: true, updatedAt: Date.now(), phaseTimers: newPhaseTimers, contestAssignments: newContestAssignments, validatedContests: newValidatedContests });
         setGame((prev: any) => ({ ...prev, status: `${nextPhase}_c${nextCycle}`, active_contest: syncData }));
         await supabase.from('games').update({ status: `${nextPhase}_c${nextCycle}`, active_contest: syncData }).eq('id', currentGameId);
         await supabase.from('game_logs').insert({
@@ -291,6 +301,7 @@ export default function StaffDashboard() {
                     }
                     if (tc.phaseTimers) setPhaseTimers(tc.phaseTimers);
                     if (tc.contestAssignments) setContestAssignments(tc.contestAssignments);
+                    if (tc.validatedContests) setValidatedContests(tc.validatedContests);
                 }
             } catch (e) { }
         }
@@ -383,10 +394,17 @@ export default function StaffDashboard() {
                 event_type: 'contest_won_global',
                 message: `📢 RÉSULTATS DU CONTEST ${contestName} : Les scores sont validés ! (${winnersLog.join(', ')})`
             });
-            alert(`Les résultats du Contest ${contestName} ont bien été annoncés dans les logs !${anyAssigned ? " Des fragments ont été distribués aux vainqueurs." : " Aucun fragment distribué (inventaires pleins ou déjà possédés)."}`);
+            console.log(`Les résultats du Contest ${contestName} ont bien été annoncés dans les logs !${anyAssigned ? " Des fragments ont été distribués aux vainqueurs." : " Aucun fragment distribué (inventaires pleins ou déjà possédés)."}`);
         } else {
-            alert(`Aucune brigade sélectionnée pour ce Contest.`);
+            console.log(`Aucune brigade sélectionnée pour ce Contest.`);
         }
+
+        // Marquer le contest comme validé et sauvegarder
+        const newValidatedContests = { ...validatedContests, [contestName]: true };
+        setValidatedContests(newValidatedContests);
+        const syncData = JSON.stringify({ timeLeft, globalTime: globalTimer, timerActive, updatedAt: Date.now(), phaseTimers, contestAssignments, validatedContests: newValidatedContests });
+        setGame((prev: any) => ({ ...prev, active_contest: syncData }));
+        await supabase.from('games').update({ active_contest: syncData }).eq('id', gameId);
     };
 
     const handlePlayerUpdate = async (playerId: string, field: string, value: string) => {
@@ -424,7 +442,7 @@ export default function StaffDashboard() {
         setTimerKey(k => k + 1); // forcer la recréation de l'intervalle
         setTimerActive(true);
 
-        const syncData = JSON.stringify({ timeLeft: t, globalTime: globalTimer, timerActive: true, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments });
+        const syncData = JSON.stringify({ timeLeft: t, globalTime: globalTimer, timerActive: true, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments, validatedContests });
         // Broadcast phase and timer state to the database
         setGame((prev: any) => ({ ...prev, status: `${phase}_c${currentCycle}`, active_contest: syncData }));
         await supabase.from('games').update({ status: `${phase}_c${currentCycle}`, active_contest: syncData }).eq('id', gameId);
@@ -462,7 +480,7 @@ export default function StaffDashboard() {
             setPhaseTimers(updatedPhaseTimers);
         }
 
-        const syncData = JSON.stringify({ timeLeft: timeLeft, globalTime: globalTimer, timerActive: newState, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments });
+        const syncData = JSON.stringify({ timeLeft: timeLeft, globalTime: globalTimer, timerActive: newState, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments, validatedContests });
         setGame((prev: any) => ({ ...prev, active_contest: syncData }));
         await supabase.from('games').update({ active_contest: syncData }).eq('id', gameId);
 
@@ -483,7 +501,7 @@ export default function StaffDashboard() {
             setPhaseTimers(updatedPhaseTimers);
         }
 
-        const syncData = JSON.stringify({ timeLeft: newTime, globalTime: globalTimer, timerActive, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments });
+        const syncData = JSON.stringify({ timeLeft: newTime, globalTime: globalTimer, timerActive, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments, validatedContests });
         setGame((prev: any) => ({ ...prev, active_contest: syncData }));
         await supabase.from('games').update({ active_contest: syncData }).eq('id', gameId);
     };
@@ -503,7 +521,7 @@ export default function StaffDashboard() {
         updatedPhaseTimers[currentPhase] = t;
         setPhaseTimers(updatedPhaseTimers);
 
-        const syncData = JSON.stringify({ timeLeft: t, globalTime: newGlobalTimer, timerActive: false, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments });
+        const syncData = JSON.stringify({ timeLeft: t, globalTime: newGlobalTimer, timerActive: false, updatedAt: Date.now(), phaseTimers: updatedPhaseTimers, contestAssignments, validatedContests });
         setGame((prev: any) => ({ ...prev, active_contest: syncData }));
         await supabase.from('games').update({ active_contest: syncData }).eq('id', gameId);
     };
@@ -517,7 +535,7 @@ export default function StaffDashboard() {
             setTimerActive(false);
             setPhaseTimers({});
 
-            const syncData = JSON.stringify({ timeLeft: 0, globalTime: globalTimer, timerActive: false, updatedAt: Date.now(), phaseTimers: {} });
+            const syncData = JSON.stringify({ timeLeft: 0, globalTime: globalTimer, timerActive: false, updatedAt: Date.now(), phaseTimers: {}, contestAssignments: {}, validatedContests: {} });
             setGame((prev: any) => ({ ...prev, status: `setup_c${nextCycle}`, active_contest: syncData }));
             await supabase.from('games').update({ status: `setup_c${nextCycle}`, active_contest: syncData }).eq('id', gameId);
 
@@ -561,7 +579,7 @@ export default function StaffDashboard() {
             await supabase.from('game_logs').delete().eq('game_id', gameId);
 
             // Reset game state
-            const syncData = JSON.stringify({ timeLeft: 0, globalTime: 0, timerActive: false, updatedAt: Date.now(), phaseTimers: {}, contestAssignments: {} });
+            const syncData = JSON.stringify({ timeLeft: 0, globalTime: 0, timerActive: false, updatedAt: Date.now(), phaseTimers: {}, contestAssignments: {}, validatedContests: {} });
             setGame((prev: any) => ({ ...prev, status: 'setup', active_contest: syncData }));
             await supabase.from('games').update({
                 status: 'setup',
@@ -576,6 +594,7 @@ export default function StaffDashboard() {
             setTimerActive(false);
             setPhaseTimers({});
             setContestAssignments({});
+            setValidatedContests({});
 
             alert("✅ L'instance a été réinitialisée avec succès !");
         } catch (e) {
@@ -859,7 +878,7 @@ export default function StaffDashboard() {
                                                                                     }
                                                                                 };
                                                                                 setContestAssignments(newAssignments);
-                                                                                const syncData = JSON.stringify({ timeLeft, globalTime: globalTimer, timerActive, updatedAt: Date.now(), phaseTimers, contestAssignments: newAssignments });
+                                                                                const syncData = JSON.stringify({ timeLeft, globalTime: globalTimer, timerActive, updatedAt: Date.now(), phaseTimers, contestAssignments: newAssignments, validatedContests });
                                                                                 setGame((prev: any) => ({ ...prev, active_contest: syncData }));
                                                                                 supabase.from('games').update({ active_contest: syncData }).eq('id', gameId);
                                                                             }}
@@ -875,11 +894,12 @@ export default function StaffDashboard() {
                                                         </div>
                                                     </div>
                                                     <Button
-                                                        className="w-full font-mono text-sm h-12 bg-purple-600 hover:bg-purple-500 text-white shadow-[0_0_20px_-3px_rgba(147,51,234,0.6)] transition-all active:scale-95"
+                                                        className="w-full font-mono text-sm h-12 bg-purple-600 hover:bg-purple-500 text-white shadow-[0_0_20px_-3px_rgba(147,51,234,0.6)] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                                                         onClick={() => handleValidateContest(contestName)}
+                                                        disabled={validatedContests[contestName]}
                                                     >
                                                         <CheckCircle2 className="w-5 h-5 mr-3" />
-                                                        VALIDER LES VICTOIRES
+                                                        {validatedContests[contestName] ? 'VICTOIRES VALIDÉES ✓' : 'VALIDER LES VICTOIRES'}
                                                     </Button>
                                                 </div>
                                             ))}

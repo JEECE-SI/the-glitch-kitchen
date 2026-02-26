@@ -639,7 +639,7 @@ export default function PlayerDashboard() {
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-4 border-b border-white/5 mb-4">
                 <div>
                     <h1 className="text-2xl md:text-3xl font-black tracking-widest font-mono text-transparent bg-clip-text bg-gradient-to-r from-white to-white/50 border-l-4 border-primary pl-4">
-                        BRIGADE_{brigadeId}
+                        {brigadeName ? brigadeName.toUpperCase() : `BRIGADE_${brigadeId}`}
                     </h1>
 
                 </div>
