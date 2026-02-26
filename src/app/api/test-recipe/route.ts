@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
+import { rateLimit } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const fetchCache = "force-no-store";
 export const maxDuration = 60;
+
+// In-memory cache to prevent duplicate concurrent requests
+const processingRequests = new Map<string, Promise<NextResponse>>();
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
@@ -33,6 +37,22 @@ const validLevel = (l: string): string => {
 
 export async function POST(req: NextRequest) {
     try {
+        // Rate limiting: max 3 requests per minute per IP (prevents API quota exhaustion)
+        const rateLimitResult = await rateLimit(req, { interval: 60000, uniqueTokenPerInterval: 3 });
+        if (!rateLimitResult.success) {
+            return NextResponse.json(
+                { error: `Trop de requêtes. Réessayez dans ${Math.ceil((rateLimitResult.reset - Date.now()) / 1000)}s.` },
+                { 
+                    status: 429,
+                    headers: {
+                        'X-RateLimit-Limit': '3',
+                        'X-RateLimit-Remaining': rateLimitResult.remaining.toString(),
+                        'X-RateLimit-Reset': rateLimitResult.reset.toString(),
+                    }
+                }
+            );
+        }
+
         if (!GROQ_API_KEY) {
             return NextResponse.json(
                 { error: "GROQ_API_KEY is not configured on the server." },
@@ -49,6 +69,38 @@ export async function POST(req: NextRequest) {
                 { status: 400 }
             );
         }
+
+        // Request deduplication: prevent concurrent duplicate requests from same brigade
+        const requestKey = `test-${brigadeDbId}`;
+        if (processingRequests.has(requestKey)) {
+            console.log(`[test-recipe] Duplicate request detected for brigade ${brigadeDbId}, returning cached promise`);
+            return processingRequests.get(requestKey)!;
+        }
+
+        // Create promise for this request
+        const requestPromise = (async () => {
+            try {
+                return await processRecipeTest(brigadeDbId, recipeSteps);
+            } finally {
+                // Clean up after 2 seconds
+                setTimeout(() => processingRequests.delete(requestKey), 2000);
+            }
+        })();
+
+        processingRequests.set(requestKey, requestPromise);
+        return requestPromise;
+
+    } catch (error: any) {
+        console.error("Recipe test error:", error);
+        return NextResponse.json(
+            { error: "Erreur interne : " + (error.message || "Unknown") },
+            { status: 500 }
+        );
+    }
+}
+
+async function processRecipeTest(brigadeDbId: string, recipeSteps: any[]): Promise<NextResponse> {
+    try {
 
         // --- Max attempts check ---
         const { data: existingTests, error: testsFetchError } = await supabase
@@ -312,7 +364,7 @@ OUTPUT FORMAT: respond ONLY with a valid JSON object, no other text:
         });
 
     } catch (error: any) {
-        console.error("Recipe test error:", error);
+        console.error("[processRecipeTest] Error:", error);
         return NextResponse.json(
             { error: "Erreur interne : " + (error.message || "Unknown") },
             { status: 500 }
