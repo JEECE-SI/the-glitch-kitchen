@@ -33,6 +33,7 @@ export default function StaffDashboard() {
     const [phaseTimers, setPhaseTimers] = useState<{ [key: string]: number }>({});
     const [cycleContests, setCycleContests] = useState<Record<string, any[]>>({});
     const [contestAssignments, setContestAssignments] = useState<Record<string, Record<string, string>>>({});
+    const [catalogContests, setCatalogContests] = useState<any[]>([]);
 
     // Refs pour éviter les closures obsolètes dans les effets du timer
     const currentPhaseRef = useRef<GamePhase>('setup');
@@ -72,6 +73,10 @@ export default function StaffDashboard() {
                 fetchBrigades(gameData.id);
                 fetchPlayers(gameData.id);
                 fetchRoles();
+
+                // Load catalog contests
+                const { data: contestsData } = await supabase.from('catalog_contests').select('*').order('title', { ascending: true });
+                if (contestsData) setCatalogContests(contestsData);
 
                 // Restore Timers from active_contest if exists
                 if (gameData.active_contest) {
@@ -336,11 +341,19 @@ export default function StaffDashboard() {
         if (!assignments) return;
 
         let anyAssigned = false;
+        let winnersLog: string[] = [];
+
         for (const [pos, brigadeId] of Object.entries(assignments)) {
             if (!brigadeId || brigadeId === 'null') continue;
 
             const frag = cycleContests[contestName]?.find(f => f.position === pos);
             if (!frag) continue;
+
+            const brigade = brigades.find(b => b.id === brigadeId);
+            if (brigade) {
+                // On prépare le log global des vainqueurs (même si inventaire plein)
+                winnersLog.push(`${pos}: ${brigade.name}`);
+            }
 
             const { data: inv } = await supabase.from('inventory').select('*').eq('brigade_id', brigadeId);
             if (inv && inv.length > 0) {
@@ -349,23 +362,30 @@ export default function StaffDashboard() {
                     const emptySlot = inv.find((slot: any) => !slot.fragment_data);
                     if (emptySlot) {
                         await supabase.from('inventory').update({ fragment_data: frag.fragment_id }).eq('id', emptySlot.id);
-                        const brigade = brigades.find(b => b.id === brigadeId);
-                        await supabase.from('game_logs').insert({
-                            game_id: gameId,
-                            brigade_id: brigadeId,
-                            event_type: 'contest_won',
-                            message: `🏆 CONTEST ${contestName} : La ${brigade?.name || 'Brigade'} s'empare de la position ${pos}! Fragment [${frag.fragment_id}] débloqué.`
-                        });
+                        if (brigade) {
+                            await supabase.from('game_logs').insert({
+                                game_id: gameId,
+                                brigade_id: brigadeId,
+                                event_type: 'contest_won',
+                                message: `🏆 CONTEST ${contestName} : La ${brigade.name} s'empare de la position ${pos}! Fragment débloqué.`
+                            });
+                        }
                         anyAssigned = true;
                     }
                 }
             }
         }
 
-        if (anyAssigned) {
-            alert(`Succès! Les victoires ont été validées pour le Contest ${contestName}. Les fragments correspondants font dorénavant partie de l'inventaire des brigades.`);
+        if (winnersLog.length > 0) {
+            // Log global pour tout le monde
+            await supabase.from('game_logs').insert({
+                game_id: gameId,
+                event_type: 'contest_won_global',
+                message: `📢 RÉSULTATS DU CONTEST ${contestName} : Les scores sont validés ! (${winnersLog.join(', ')})`
+            });
+            alert(`Les résultats du Contest ${contestName} ont bien été annoncés dans les logs !${anyAssigned ? " Des fragments ont été distribués aux vainqueurs." : " Aucun fragment distribué (inventaires pleins ou déjà possédés)."}`);
         } else {
-            alert(`Aucun fragment n'a été distribué. Soit aucune brigade n'est sélectionnée, soit elles ont déjà ce fragment, soit leur inventaire est plein.`);
+            alert(`Aucune brigade sélectionnée pour ce Contest.`);
         }
     };
 
@@ -709,45 +729,83 @@ export default function StaffDashboard() {
                                     </div>
                                 </Card>
 
-                                {/* PHASE INFO & ACTIONS */}
+                                {/* CYCLE CONTESTS PANEL */}
                                 <div className="space-y-6">
                                     <Card className="glass-panel border-white/10 bg-background/50 h-full">
-                                        <CardHeader>
-                                            <CardTitle className="font-mono text-sm text-muted-foreground">PHASE_DIRECTIVES</CardTitle>
+                                        <CardHeader className="border-b border-white/5 pb-3">
+                                            <CardTitle className="font-mono text-sm text-muted-foreground flex items-center gap-2">
+                                                <Trophy className="w-4 h-4 text-purple-400" />
+                                                CONTESTS — CYCLE {currentCycle}
+                                            </CardTitle>
                                         </CardHeader>
-                                        <CardContent className="font-mono text-sm space-y-4">
-                                            {currentPhase === 'setup' && (
-                                                <div className="text-white/60 text-center py-8">
-                                                    Select a phase to begin Cycle {currentCycle}.
-                                                </div>
-                                            )}
-                                            {currentPhase === 'annonce' && (
-                                                <div className="space-y-4">
-                                                    <p className="text-blue-400 font-bold">1. Affichez les 3 Contests à l'écran principal.</p>
-                                                    <p>2. Laissez les brigades lire le Brief.</p>
-                                                    <p>3. Les brigades dispatchent leurs représentants physiquement dans les salles.</p>
-                                                    <Badge variant="outline" className="text-blue-400 border-blue-400/50 w-full justify-center mt-4">PRÉPARATION</Badge>
-                                                </div>
-                                            )}
-                                            {currentPhase === 'contests' && (
-                                                <div className="space-y-4">
-                                                    <p className="text-purple-400 font-bold">1. Les Staffs locaux lancent les Contests.</p>
-                                                    <p>2. Veillez au respect du temps.</p>
-                                                    <p>3. Notez les brigades gagnantes dans le système (bientôt dispo).</p>
-                                                    <Badge variant="outline" className="text-purple-400 border-purple-400/50 w-full justify-center mt-4">ACTION EN COURS</Badge>
-                                                </div>
-                                            )}
-                                            {currentPhase === 'temps_libre' && (
-                                                <div className="space-y-4">
-                                                    <p className="text-green-400 font-bold">1. Les joueurs retournent au QG.</p>
-                                                    <p>2. Ils déchiffrent au Labo, négocient à l'Office.</p>
-                                                    <p>3. Débrief inter-brigades : "Quelle est la strat pour le prochain ?"</p>
-                                                    <div className="bg-red-500/10 border border-red-500/30 p-3 rounded mt-4">
-                                                        <p className="text-xs text-red-400 flex items-center gap-2 font-bold mb-1"><AlertTriangle className="w-3 h-3" /> GLITCH ALERT</p>
-                                                        <p className="text-[10px] text-white/80">Des évènements imprévus peuvent se déclencher maintenant.</p>
-                                                    </div>
-                                                </div>
-                                            )}
+                                        <CardContent className="p-4 space-y-3">
+                                            {(() => {
+                                                const cycleItems = catalogContests
+                                                    .filter(c => c.title.match(new RegExp(`^${currentCycle}\.`)))
+                                                    .sort((a, b) => a.title.localeCompare(b.title))
+                                                    .slice(0, 3);
+
+                                                const parseDesc = (desc: string) => {
+                                                    const parts = desc.split(' | ');
+                                                    const rawEffectif = parts[1]?.trim() || '?';
+                                                    return {
+                                                        type: parts[0]?.trim() || '?',
+                                                        effectif: rawEffectif.replace(/Min/g, 'Minimum').replace(/Max/g, 'Maximum'),
+                                                        rolesUtiles: parts[parts.length - 1]?.replace('Rôles utiles:', '').trim() || ''
+                                                    };
+                                                };
+
+                                                const typeColors: Record<string, string> = {
+                                                    'Mémoire': 'text-blue-400   border-blue-400/30   bg-blue-400/8',
+                                                    'Physique': 'text-orange-400 border-orange-400/30 bg-orange-400/8',
+                                                    'Social': 'text-pink-400   border-pink-400/30   bg-pink-400/8',
+                                                    'Coordination': 'text-emerald-400 border-emerald-400/30 bg-emerald-400/8',
+                                                    'Dilemme': 'text-red-400    border-red-400/30    bg-red-400/8',
+                                                    'Logique': 'text-purple-400 border-purple-400/30 bg-purple-400/8',
+                                                    'Stratégie': 'text-yellow-400 border-yellow-400/30 bg-yellow-400/8',
+                                                };
+
+                                                if (cycleItems.length === 0) {
+                                                    return (
+                                                        <div className="text-white/30 text-center text-xs font-mono py-8">
+                                                            Aucun contest trouvé pour le Cycle {currentCycle}.<br />
+                                                            <span className="text-[10px] opacity-60">Vérifiez le catalog_contests.</span>
+                                                        </div>
+                                                    );
+                                                }
+
+                                                return cycleItems.map((contest, i) => {
+                                                    const num = contest.title.split('—')[0]?.trim() || contest.title.split('-')[0]?.trim();
+                                                    const titlePart = contest.title.includes('—')
+                                                        ? contest.title.split('—').slice(1).join('—').trim()
+                                                        : contest.title.includes(' - ')
+                                                            ? contest.title.split(' - ').slice(1).join(' - ').trim()
+                                                            : '';
+                                                    const { type, effectif } = parseDesc(contest.description);
+                                                    const typeColor = typeColors[type] || 'text-white/50 border-white/10 bg-white/5';
+
+                                                    return (
+                                                        <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-white/5 border border-white/8 hover:bg-white/8 transition-colors">
+                                                            {/* Number badge */}
+                                                            <div className="shrink-0 w-12 h-12 rounded-lg bg-purple-500/15 border border-purple-500/30 flex items-center justify-center">
+                                                                <span className="font-mono text-sm font-black text-purple-300 leading-none">{num?.replace('—', '').trim()}</span>
+                                                            </div>
+                                                            {/* Info */}
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="font-mono text-xs font-bold text-white leading-tight mb-1.5">{titlePart || '???'}</p>
+                                                                <div className="flex flex-wrap gap-1.5">
+                                                                    <span className={`font-mono text-[9px] uppercase tracking-wider px-2 py-0.5 rounded-full border ${typeColor}`}>
+                                                                        {type}
+                                                                    </span>
+                                                                    <span className="font-mono text-[9px] bg-white/8 border border-white/15 px-2 py-0.5 rounded-full text-white/60">
+                                                                        {effectif}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                });
+                                            })()}
                                         </CardContent>
                                         {currentPhase === 'temps_libre' && timeLeft === 0 && (
                                             <CardFooter className="pt-4 border-t border-white/5">
@@ -761,7 +819,7 @@ export default function StaffDashboard() {
                                 </div>
                             </div>
 
-                            {currentPhase === 'contests' && Object.keys(cycleContests).length > 0 && (
+                            {(currentPhase === 'contests' || currentPhase === 'temps_libre') && Object.keys(cycleContests).length > 0 && (
                                 <Card className="glass-panel border-white/10 bg-background/50 mt-6 md:mt-8">
                                     <CardHeader className="border-b border-white/5 pb-4">
                                         <CardTitle className="font-mono text-xl flex items-center gap-2 text-purple-400">
@@ -787,7 +845,7 @@ export default function StaffDashboard() {
                                                                 return (
                                                                     <div key={pos} className="flex flex-col gap-2">
                                                                         <span className="font-mono text-sm font-bold text-muted-foreground uppercase flex items-center gap-2">
-                                                                            {pos} <span className="text-white/40 text-xs font-normal">({frag.fragment_id})</span>
+                                                                            {pos}
                                                                         </span>
                                                                         <select
                                                                             className="h-12 w-full bg-black/50 border border-white/20 rounded-md px-4 font-mono text-sm text-white uppercase focus:border-purple-500 outline-none transition-colors shadow-inner"
@@ -808,7 +866,7 @@ export default function StaffDashboard() {
                                                                         >
                                                                             <option value="null">-- SÉLECTIONNER UNE BRIGADE --</option>
                                                                             {brigades.map(b => (
-                                                                                <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
+                                                                                <option key={b.id} value={b.id}>{b.name}</option>
                                                                             ))}
                                                                         </select>
                                                                     </div>

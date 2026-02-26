@@ -18,6 +18,8 @@ export default function PlayerDashboard() {
     const brigadeId = params.brigade_id as string;
     const [activeTab, setActiveTab] = useState("intel");
     const [players, setPlayers] = useState<any[]>([]);
+    const [catalogRoles, setCatalogRoles] = useState<any[]>([]);
+    const [catalogContests, setCatalogContests] = useState<any[]>([]);
     const [gameId, setGameId] = useState<string | null>(null);
     const [brigadeName, setBrigadeName] = useState("");
     const [brigadeDbId, setBrigadeDbId] = useState("");
@@ -36,6 +38,11 @@ export default function PlayerDashboard() {
     const [isDecrypting, setIsDecrypting] = useState(false);
     const [selectedFragment, setSelectedFragment] = useState<any | null>(null);
     const [brigadeRankings, setBrigadeRankings] = useState<{ name: string; code: string; best_score: number; attempt: number }[]>([]);
+
+    // Annonce popup state
+    const [showAnnoncePopup, setShowAnnoncePopup] = useState(false);
+    const [annonceIntel, setAnnonceIntel] = useState<any[]>([]);
+    const annonceTriggeredRef = useRef<number>(0);
 
     // Recipe testing state
     const [isTesting, setIsTesting] = useState(false);
@@ -115,7 +122,18 @@ export default function PlayerDashboard() {
 
             const { data: invData } = await supabase.from('inventory').select('*').eq('brigade_id', brigadeData.id).order('slot_index', { ascending: true });
             if (invData && invData.length > 0) {
-                setInventory(invData);
+                // If fewer than 50 slots exist (e.g. old brigades had 15), fill up to 50
+                if (invData.length < 50) {
+                    const existingIndices = new Set(invData.map((s: any) => s.slot_index));
+                    const missingSlots = Array.from({ length: 50 }, (_, i) => i + 1)
+                        .filter(idx => !existingIndices.has(idx))
+                        .map(idx => ({ brigade_id: brigadeData.id, slot_index: idx, fragment_data: null }));
+                    const { data: inserted } = await supabase.from('inventory').insert(missingSlots).select();
+                    const allSlots = [...invData, ...(inserted || missingSlots as any)].sort((a: any, b: any) => a.slot_index - b.slot_index);
+                    setInventory(allSlots);
+                } else {
+                    setInventory(invData);
+                }
             } else {
                 // Initialize inventory if missing
                 const newInv = Array.from({ length: 50 }, (_, i) => ({
@@ -190,6 +208,22 @@ export default function PlayerDashboard() {
                 }
             } catch (e) {
                 console.warn('[PlayerDashboard] Could not load brigade rankings:', e);
+            }
+
+            // Load catalog roles
+            try {
+                const { data: rolesData } = await supabase.from('catalog_roles').select('*');
+                if (rolesData) setCatalogRoles(rolesData);
+            } catch (e) {
+                console.warn('[PlayerDashboard] Could not load catalog_roles:', e);
+            }
+
+            // Load catalog contests for annonce popup
+            try {
+                const { data: contestsData } = await supabase.from('catalog_contests').select('*').order('title', { ascending: true });
+                if (contestsData) setCatalogContests(contestsData);
+            } catch (e) {
+                console.warn('[PlayerDashboard] Could not load catalog_contests:', e);
             }
         };
         fetchInitialData();
@@ -283,6 +317,99 @@ export default function PlayerDashboard() {
         }, 1000);
         return () => clearInterval(interval);
     }, [isTimerRunning]);
+
+    // Trigger the annonce popup when the phase changes to 'annonce' for a new cycle
+    // Listen directly to gameState.status (source of truth) to avoid derived-state batching issues
+    useEffect(() => {
+        if (!gameState?.status || !brigadeDbId || !gameId || catalogContests.length === 0) return;
+
+        const status = gameState.status as string;
+        if (!status.startsWith('annonce_c')) return;
+
+        const cycleNum = parseInt(status.replace('annonce_c', ''), 10);
+        if (isNaN(cycleNum)) return;
+        if (annonceTriggeredRef.current === cycleNum) return; // already triggered for this cycle
+        annonceTriggeredRef.current = cycleNum;
+
+        // --- Seeded random utilities ---
+        const seededRng = (seed: string) => {
+            let h = 0;
+            for (let i = 0; i < seed.length; i++) h = (Math.imul(31, h) + seed.charCodeAt(i)) | 0;
+            return () => {
+                h = (h + 0x6D2B79F5) | 0;
+                let t = Math.imul(h ^ (h >>> 15), 1 | h);
+                t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+        };
+
+        const fisherShuffle = <T,>(arr: T[], rng: () => number): T[] => {
+            const a = [...arr];
+            for (let i = a.length - 1; i > 0; i--) {
+                const j = Math.floor(rng() * (i + 1));
+                [a[i], a[j]] = [a[j], a[i]];
+            }
+            return a;
+        };
+
+        // Get the 3 contests for this cycle (e.g. "1.1", "1.2", "1.3")
+        const cycleContests = catalogContests
+            .filter(c => c.title.match(new RegExp(`^${cycleNum}\\.`)))
+            .sort((a, b) => a.title.localeCompare(b.title))
+            .slice(0, 3);
+
+        if (cycleContests.length === 0) return;
+
+        // Parse type & effectif from description (format: "Type | Effectif | ...")
+        const parseDesc = (desc: string) => {
+            const parts = desc.split(' | ');
+            const rawEffectif = parts[1]?.trim() || '?';
+            return { type: parts[0]?.trim() || '?', effectif: rawEffectif.replace(/Min/g, 'Minimum').replace(/Max/g, 'Maximum') };
+        };
+
+        // --- Per-brigade intel: which contest type(s) are revealed ---
+        const rngType = seededRng(`${brigadeDbId}-${cycleNum}-type`);
+        const indices = fisherShuffle([0, 1, 2], rngType);
+        // 1 or 2 types revealed (never 0)
+        const revealCount = 1 + Math.floor(rngType() * 2);
+        const typeRevealSet = new Set(indices.slice(0, revealCount));
+
+        // --- Game-wide title bonus: 2 lucky brigades get ONE contest title ---
+        // IMPORTANT: Sort IDs before shuffling so all player pages agree on the same result
+        // regardless of the order Supabase returns brigades in.
+        const allBrigsForSeed = allBrigadesRef.current;
+        const sortedBrigIds = allBrigsForSeed.map(b => b.id).sort(); // deterministic order
+        const rngTitle = seededRng(`${gameId}-${cycleNum}-title`);
+        const shuffledBrigIds = fisherShuffle(sortedBrigIds, rngTitle);
+        // The first 2 in the shuffled list are this cycle's lucky brigades
+        const luckyBrigadeIds = new Set(shuffledBrigIds.slice(0, 2));
+        const isLucky = luckyBrigadeIds.has(brigadeDbId);
+        // Both lucky brigades see the title of the SAME randomly picked contest
+        const titleContestIndex = Math.floor(rngTitle() * cycleContests.length);
+
+        const intel = cycleContests.map((contest, i) => {
+            const contestNumber = contest.title.split('\u2014')[0]?.trim() ||
+                contest.title.split('-')[0]?.trim() ||
+                contest.title;
+            const afterDash = contest.title.includes('\u2014')
+                ? contest.title.split('\u2014').slice(1).join('\u2014').trim()
+                : contest.title.includes(' — ')
+                    ? contest.title.split(' — ').slice(1).join(' — ').trim()
+                    : '';
+            const { type, effectif } = parseDesc(contest.description);
+            return {
+                contestNumber: contestNumber.replace('\u2014', '').trim(),
+                fullTitle: afterDash,
+                type,
+                effectif,
+                showType: typeRevealSet.has(i),
+                showTitle: isLucky && i === titleContestIndex,
+            };
+        });
+
+        setAnnonceIntel(intel);
+        setShowAnnoncePopup(true);
+    }, [gameState, brigadeDbId, gameId, catalogContests]);
 
     const formatTime = (secs: number) => {
         const h = Math.floor(secs / 3600);
@@ -981,20 +1108,46 @@ export default function PlayerDashboard() {
                                     BRIGADE_ROSTER
                                 </CardTitle>
                                 <CardDescription>
-                                    List of detected personnel and assigned capability matrix.
+                                    Liste du personnel détecté et de leur pouvoir de jeu.
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {players.map((p, i) => (
-                                        <div key={i} className="bg-white/5 border border-white/10 p-4 rounded flex flex-col items-center justify-center relative overflow-hidden group">
-                                            <div className="absolute top-0 right-0 w-16 h-16 bg-secondary/10 rounded-bl-full -z-10 group-hover:bg-secondary/20 transition-colors" />
-                                            <Shield className="w-8 h-8 text-secondary/50 mb-3" />
-                                            <span className="font-bold text-white mb-1 text-center">{p.name}</span>
-                                            <span className="font-mono text-xs text-primary/80 text-center">{p.role || "UNASSIGNED"}</span>
-                                            {p.role_used && <Badge variant="destructive" className="mt-2 text-[10px] font-mono">CAPABILITY_EXHAUSTED</Badge>}
-                                        </div>
-                                    ))}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {players.map((p, i) => {
+                                        const roleInfo = catalogRoles.find(r => r.title === p.role);
+                                        return (
+                                            <div key={i} className="relative overflow-hidden rounded-xl border border-white/10 bg-white/5 p-5 flex flex-col gap-3 group hover:bg-white/8 hover:border-secondary/30 transition-all duration-200">
+                                                {/* Background accent */}
+                                                <div className="absolute top-0 right-0 w-24 h-24 bg-secondary/5 rounded-bl-[60px] -z-10 group-hover:bg-secondary/10 transition-colors" />
+                                                {/* Header: Name + Status */}
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-10 h-10 rounded-full bg-secondary/15 border border-secondary/30 flex items-center justify-center shrink-0">
+                                                            <Shield className="w-5 h-5 text-secondary/70" />
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-bold text-white leading-tight">{p.name}</p>
+                                                            {p.role_used && <Badge variant="destructive" className="mt-1 text-[9px] font-mono px-1.5 py-0">POUVOIR UTILISÉ</Badge>}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {/* Role info */}
+                                                {roleInfo ? (
+                                                    <div className="border-t border-white/5 pt-3 space-y-2">
+                                                        <div className="flex items-center justify-between">
+                                                            <span className="font-mono text-xs font-bold text-primary">{roleInfo.title}</span>
+                                                            <span className="font-mono text-[10px] bg-primary/15 text-primary border border-primary/30 px-2 py-0.5 rounded-full">{roleInfo.power_name}</span>
+                                                        </div>
+                                                        <p className="text-[11px] text-white/50 leading-relaxed">{roleInfo.description}</p>
+                                                    </div>
+                                                ) : (
+                                                    <div className="border-t border-white/5 pt-3">
+                                                        <span className="font-mono text-xs text-white/30 italic">{p.role || "NON ASSIGNÉ"}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
                                     {players.length === 0 && (
                                         <div className="col-span-full flex flex-col items-center justify-center p-8 border border-dashed border-white/10 rounded">
                                             <span className="font-mono md:text-lg text-muted-foreground">NO_PERSONNEL_DETECTED</span>
@@ -1039,6 +1192,104 @@ export default function PlayerDashboard() {
                             </Button>
                         </CardFooter>
                     </Card>
+                </div>
+            )}
+
+            {/* ============================================================ */}
+            {/* ANNONCE POPUP — shown at the start of each cycle's annonce phase */}
+            {showAnnoncePopup && annonceIntel.length > 0 && (
+                <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowAnnoncePopup(false); }}>
+                    <div className="w-full max-w-xl animate-in fade-in zoom-in-95 duration-300">
+
+                        {/* Header */}
+                        <div className="text-center mb-5">
+                            <div className="inline-flex items-center gap-2 bg-primary/20 border border-primary/40 text-primary px-4 py-1.5 rounded-full font-mono text-xs mb-3 animate-pulse">
+                                <Activity className="w-3.5 h-3.5" />
+                                CYCLE {currentCycle} / 4
+                            </div>
+                            <h2 className="text-2xl font-black font-mono text-white tracking-widest uppercase">
+                                Briefing des Contests
+                            </h2>
+                            <p className="text-white/35 text-xs font-mono mt-1.5 max-w-sm mx-auto leading-relaxed">
+                                Informations interceptées selon votre niveau d'accès brigade.
+                            </p>
+                        </div>
+
+                        {/* Contest Cards */}
+                        <div className="grid grid-cols-3 gap-3 mb-5">
+                            {annonceIntel.map((info, i) => {
+                                const typeColors: Record<string, string> = {
+                                    'Mémoire': 'text-blue-400   bg-blue-400/10   border-blue-400/30',
+                                    'Physique': 'text-orange-400 bg-orange-400/10 border-orange-400/30',
+                                    'Social': 'text-pink-400   bg-pink-400/10   border-pink-400/30',
+                                    'Coordination': 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30',
+                                    'Dilemme': 'text-red-400    bg-red-400/10    border-red-400/30',
+                                    'Logique': 'text-purple-400 bg-purple-400/10 border-purple-400/30',
+                                    'Stratégie': 'text-yellow-400 bg-yellow-400/10 border-yellow-400/30',
+                                };
+                                const typeColor = typeColors[info.type] || 'text-white/40 bg-white/5 border-white/10';
+
+                                return (
+                                    <div
+                                        key={i}
+                                        className={`relative bg-white/5 border rounded-xl p-4 flex flex-col items-center gap-3 overflow-hidden transition-all duration-300
+                                            ${info.showTitle ? 'border-yellow-400/30 shadow-[0_0_24px_-6px_rgba(250,204,21,0.4)]' : 'border-white/10'}`}
+                                    >
+                                        {/* Lucky glow */}
+                                        {info.showTitle && (
+                                            <div className="absolute inset-0 bg-gradient-to-b from-yellow-400/5 to-transparent pointer-events-none rounded-xl" />
+                                        )}
+
+                                        {/* Contest number — always visible */}
+                                        <span className="font-mono text-3xl font-black text-white tracking-tight">
+                                            {info.contestNumber}
+                                        </span>
+
+                                        {/* Effectif — always visible */}
+                                        <div className="w-full text-center">
+                                            <div className="text-[9px] font-mono text-white/40 uppercase mb-1">Effectif</div>
+                                            <span className="font-mono text-[11px] bg-white/10 border border-white/15 px-3 py-1 rounded-full text-white/70 inline-block font-bold">
+                                                {info.effectif}
+                                            </span>
+                                        </div>
+
+                                        {/* Type — conditionally visible */}
+                                        <div className="min-h-[40px] flex flex-col items-center justify-center w-full">
+                                            <div className="text-[9px] font-mono text-white/40 uppercase mb-1">Type</div>
+                                            {info.showType ? (
+                                                <span className={`font-mono text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full border ${typeColor} inline-block font-bold`}>
+                                                    {info.type}
+                                                </span>
+                                            ) : (
+                                                <span className="font-mono text-[9px] text-white/20 tracking-[0.2em] uppercase bg-black/30 px-2 py-0.5 rounded">INCONNU</span>
+                                            )}
+                                        </div>
+
+                                        {/* Title — only for 2 lucky brigades, 1 random contest */}
+                                        <div className="min-h-[44px] flex flex-col items-center justify-start w-full text-center">
+                                            <div className="text-[9px] font-mono text-white/40 uppercase mb-1">Nom du Contest</div>
+                                            {info.showTitle ? (
+                                                <span className="font-mono text-[12px] font-bold text-yellow-300 leading-snug break-words px-2">{info.fullTitle}</span>
+                                            ) : (
+                                                <span className="font-mono text-[10px] text-white/20 tracking-[0.3em] font-bold">—</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* Dismiss button */}
+                        <div className="text-center">
+                            <button
+                                onClick={() => setShowAnnoncePopup(false)}
+                                className="font-mono text-sm font-bold bg-primary hover:bg-primary/80 text-primary-foreground px-10 py-3 rounded-full transition-all active:scale-95 shadow-[0_0_30px_-5px_rgba(99,102,241,0.5)] hover:shadow-[0_0_40px_-5px_rgba(99,102,241,0.7)]"
+                            >
+                                J'AI COMPRIS — LANCER LA STRATÉGIE
+                            </button>
+                        </div>
+
+                    </div>
                 </div>
             )}
         </div>

@@ -67,6 +67,27 @@ export default function AdminDashboard() {
         };
     }, []);
 
+    const [isSeeding, setIsSeeding] = useState(false);
+    const seedCatalog = async () => {
+        if (!confirm('⚠️ Cela va EFFACER et REMPLACER tous les rôles et contests du catalogue par les 8 rôles et 12 contests officiels. Continuer ?')) return;
+        setIsSeeding(true);
+        try {
+            const res = await fetch('/api/seed-catalog', { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                alert(`✅ Catalogue initialisé ! ${data.roles.length} rôles et ${data.contests.length} contests créés.`);
+                fetchCatalogRoles();
+                fetchCatalogContests();
+            } else {
+                alert('❌ Erreur : ' + data.error);
+            }
+        } catch (e: any) {
+            alert('❌ Erreur réseau : ' + e.message);
+        } finally {
+            setIsSeeding(false);
+        }
+    };
+
     const fetchGames = async () => {
         const { data } = await supabase.from('games').select('*').order('created_at', { ascending: false });
         if (data) setGames(data);
@@ -268,33 +289,51 @@ export default function AdminDashboard() {
         availableRoles: string[]
     ): { brigade_id: string; name: string; role: string | null }[] => {
         const ROLE_MAP: Record<string, string> = {
-            "président": "Le Chef de Brigade",
-            "president": "Le Chef de Brigade",
-            "trésorier": "L'Économe",
-            "tresorier": "L'Économe",
-            "secrétaire général": "Le Garde-Manger",
-            "secretaire general": "Le Garde-Manger",
-            "responsable commercial": "Le Sourcier",
-            "commercial": "Le Sourcier",
-            "sales": "Le Sourcier",
-            "chef de projet": "Le Sous-Chef",
-            "responsable qualité": "L'Auditeur",
-            "responsable qualite": "L'Auditeur",
-            "qualité": "L'Auditeur",
-            "qualite": "L'Auditeur",
-            "responsable communication": "Le Dressage",
-            "communication": "Le Dressage",
-            "com": "Le Dressage",
-            "responsable rse": "L'Éco-Sourcier",
-            "rse": "L'Éco-Sourcier",
-            "développeur commercial": "Le Maître d'Hôtel",
-            "developpeur commercial": "Le Maître d'Hôtel",
-            "bizdev": "Le Maître d'Hôtel",
-            "dsi": "Le Hacker Chef",
-            "si": "Le Hacker Chef",
-            "it": "Le Hacker Chef",
-            "informatique": "Le Hacker Chef",
-            "tech": "Le Hacker Chef",
+            // 1. Le Chef (Président) — Voix d'Or
+            "président": "Le Chef",
+            "president": "Le Chef",
+            "pdg": "Le Chef",
+            "ceo": "Le Chef",
+            // 2. Le Bras Droit (Chef de Projet) — Renfort
+            "chef de projet": "Le Bras Droit",
+            "project manager": "Le Bras Droit",
+            "pm": "Le Bras Droit",
+            // 3. Le Filet (Secrétaire Général) — Seconde Chance
+            "secrétaire général": "Le Filet",
+            "secretaire general": "Le Filet",
+            "secrétaire": "Le Filet",
+            "secretaire": "Le Filet",
+            // 4. L'Éclaireur (Resp. Commercial) — Vision
+            "responsable commercial": "L'Éclaireur",
+            "resp commercial": "L'Éclaireur",
+            "commercial": "L'Éclaireur",
+            "sales": "L'Éclaireur",
+            // 5. Le Contrôleur (Resp. Qualité) — Vérification
+            "responsable qualité": "Le Contrôleur",
+            "responsable qualite": "Le Contrôleur",
+            "resp qualité": "Le Contrôleur",
+            "qualité": "Le Contrôleur",
+            "qualite": "Le Contrôleur",
+            // 6. Le Décodeur (DSI) — Décryptage
+            "dsi": "Le Décodeur",
+            "si": "Le Décodeur",
+            "it": "Le Décodeur",
+            "informatique": "Le Décodeur",
+            "tech": "Le Décodeur",
+            "directeur des systèmes d'information": "Le Décodeur",
+            "directeur si": "Le Décodeur",
+            // 7. Le Négociateur (Dév. Commercial) — Influence
+            "développeur commercial": "Le Négociateur",
+            "developpeur commercial": "Le Négociateur",
+            "bizdev": "Le Négociateur",
+            "développement commercial": "Le Négociateur",
+            "dev commercial": "Le Négociateur",
+            // 8. L'Agent Double (Resp. Communication) — Perturbation
+            "responsable communication": "L'Agent Double",
+            "resp communication": "L'Agent Double",
+            "communication": "L'Agent Double",
+            "com": "L'Agent Double",
+            "responsable com": "L'Agent Double",
         };
 
         const getPreferredRole = (poste: string): string | null => {
@@ -1119,6 +1158,13 @@ export default function AdminDashboard() {
                                 <h2 className="text-2xl font-bold font-mono text-white">Roles Catalog</h2>
                                 <p className="text-muted-foreground text-sm">Define global roles and their powers.</p>
                             </div>
+                            <Button
+                                onClick={seedCatalog}
+                                disabled={isSeeding}
+                                className="font-mono text-xs bg-secondary hover:bg-secondary/80 text-secondary-foreground"
+                            >
+                                {isSeeding ? 'SEEDING...' : '⚡ SEED_CATALOG (8 rôles + 12 contests)'}
+                            </Button>
                         </div>
 
                         <Card className="glass-panel border-white/10 p-4 space-y-4">

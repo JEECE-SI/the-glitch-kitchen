@@ -112,7 +112,7 @@ export default function GameMasterDashboard() {
                                         <CardTitle className="text-sm text-muted-foreground font-mono">DEPLOYED_FRAGMENTS</CardTitle>
                                     </CardHeader>
                                     <CardContent>
-                                        <div className="text-2xl font-bold font-mono text-secondary">0 / 15</div>
+                                        <div className="text-2xl font-bold font-mono text-secondary">0 / 50</div>
                                     </CardContent>
                                 </Card>
                                 <Card className="bg-white/5 border-white/10">
