@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -18,6 +18,16 @@ export default function GameMasterDashboard() {
     const [brigades, setBrigades] = useState<any[]>([]);
     const [activeTab, setActiveTab] = useState("overview");
 
+    const fetchGame = useCallback(async () => {
+        const { data } = await supabase.from('games').select('*').eq('id', gameId).single();
+        if (data) setGame(data);
+    }, [gameId]);
+
+    const fetchBrigades = useCallback(async () => {
+        const { data } = await supabase.from('brigades').select('*').eq('game_id', gameId).order('name', { ascending: true });
+        if (data) setBrigades(data);
+    }, [gameId]);
+
     useEffect(() => {
         if (!gameId) return;
 
@@ -32,17 +42,7 @@ export default function GameMasterDashboard() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [gameId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    const fetchGame = async () => {
-        const { data } = await supabase.from('games').select('*').eq('id', gameId).single();
-        if (data) setGame(data);
-    };
-
-    const fetchBrigades = async () => {
-        const { data } = await supabase.from('brigades').select('*').eq('game_id', gameId).order('name', { ascending: true });
-        if (data) setBrigades(data);
-    };
+    }, [gameId, fetchGame, fetchBrigades]);
 
     const advancePhase = async () => {
         if (!game) return;

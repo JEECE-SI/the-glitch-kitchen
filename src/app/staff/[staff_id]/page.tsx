@@ -50,6 +50,25 @@ export default function StaffDashboard() {
     // Flag pour bloquer la resync externe pendant une transition automatique
     const isTransitioningRef = useRef(false);
 
+    async function fetchPlayers(gId: string) {
+        const { data: bData } = await supabase.from('brigades').select('id').eq('game_id', gId);
+        if (bData && bData.length > 0) {
+            const bIds = bData.map(b => b.id);
+            const { data: pData } = await supabase.from('players').select('*').in('brigade_id', bIds).order('name');
+            if (pData) setPlayers(pData);
+        }
+    }
+
+    async function fetchBrigades(gId: string) {
+        const { data } = await supabase.from('brigades').select('*').eq('game_id', gId).order('name');
+        if (data) setBrigades(data);
+    }
+
+    async function fetchRoles() {
+        const { data } = await supabase.from('catalog_roles').select('*');
+        if (data) setCatalogRoles(data);
+    }
+
     useEffect(() => {
         // Attempt to find game by ID or assume staffId is a code.
         // For now, we query by id (assuming staffId = gameId)
@@ -134,7 +153,9 @@ export default function StaffDashboard() {
     useEffect(() => { gameSettingsRef.current = game?.settings; }, [game?.settings]);
 
     useEffect(() => {
-        if (game?.status) {
+        if (!game?.status) return;
+        
+        const updatePhaseAndCycle = () => {
             const status = game.status as string;
             if (status === 'finished') {
                 setCurrentPhase('finished');
@@ -150,7 +171,9 @@ export default function StaffDashboard() {
                 setCurrentPhase('setup');
                 setCurrentCycle(1);
             }
-        }
+        };
+        
+        updatePhaseAndCycle();
     }, [game?.status]);
 
     // Fonction de transition automatique — lit toujours les refs fraîches
@@ -277,14 +300,14 @@ export default function StaffDashboard() {
         }, 1000);
 
         return () => clearInterval(interval);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [timerActive, timerKey, autoAdvancePhase]);
 
     // Sync depuis la DB quand un autre client met à jour (ne pas rejouer si c'est nous qui venons de le faire)
     useEffect(() => {
-        if (game?.active_contest) {
-            // Si une transition est en cours côté local, ignorer la resync
-            if (isTransitioningRef.current) return;
+        if (!game?.active_contest) return;
+        if (isTransitioningRef.current) return;
+        
+        const syncFromDB = () => {
             try {
                 const tc = typeof game.active_contest === 'string' ? JSON.parse(game.active_contest) : game.active_contest;
                 if (tc.updatedAt) {
@@ -304,28 +327,10 @@ export default function StaffDashboard() {
                     if (tc.validatedContests) setValidatedContests(tc.validatedContests);
                 }
             } catch { }
-        }
+        };
+        
+        syncFromDB();
     }, [game?.active_contest]);
-
-    const fetchPlayers = async (gId: string) => {
-        // Players are linked to brigade, so we fetch players of brigades in this game.
-        const { data: bData } = await supabase.from('brigades').select('id').eq('game_id', gId);
-        if (bData && bData.length > 0) {
-            const bIds = bData.map(b => b.id);
-            const { data: pData } = await supabase.from('players').select('*').in('brigade_id', bIds).order('name');
-            if (pData) setPlayers(pData);
-        }
-    };
-
-    const fetchBrigades = async (gId: string) => {
-        const { data } = await supabase.from('brigades').select('*').eq('game_id', gId).order('name');
-        if (data) setBrigades(data);
-    };
-
-    const fetchRoles = async () => {
-        const { data } = await supabase.from('catalog_roles').select('*');
-        if (data) setCatalogRoles(data);
-    };
 
     useEffect(() => {
         const fetchContests = async () => {
