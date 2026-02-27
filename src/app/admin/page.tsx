@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Database, Plus, Settings, Users, Server, Trash2, Settings2, PlaySquare, Square, AlertTriangle } from "lucide-react";
+import { Database, Plus, Settings, Users, Server, Trash2, Settings2, PlaySquare, Square, AlertTriangle, Edit, ArrowLeftRight } from "lucide-react";
 import * as XLSX from "xlsx";
 
 export default function AdminDashboard() {
@@ -24,6 +24,7 @@ export default function AdminDashboard() {
 
     const [catalogRoles, setCatalogRoles] = useState<any[]>([]);
     const [catalogContests, setCatalogContests] = useState<any[]>([]);
+    const [leaderboard, setLeaderboard] = useState<any[]>([]);
 
     const [isGameDialogOpen, setIsGameDialogOpen] = useState(false);
     const [newGameName, setNewGameName] = useState("");
@@ -57,6 +58,15 @@ export default function AdminDashboard() {
     const [playerGameFilter, setPlayerGameFilter] = useState("");
     const [playerBrigadeFilter, setPlayerBrigadeFilter] = useState("");
 
+    const [isEditPlayerOpen, setIsEditPlayerOpen] = useState(false);
+    const [editingPlayer, setEditingPlayer] = useState<any>(null);
+    const [isSwapPlayerOpen, setIsSwapPlayerOpen] = useState(false);
+    const [swapSourcePlayer, setSwapSourcePlayer] = useState<any>(null);
+    const [swapTargetPlayerId, setSwapTargetPlayerId] = useState("");
+
+    const [isEditBrigadeOpen, setIsEditBrigadeOpen] = useState(false);
+    const [editingBrigade, setEditingBrigade] = useState<any>(null);
+
     const [brigadeSearchTerm, setBrigadeSearchTerm] = useState("");
     const [brigadeGameFilter, setBrigadeGameFilter] = useState("");
 
@@ -67,6 +77,7 @@ export default function AdminDashboard() {
         fetchStaff();
         fetchCatalogRoles();
         fetchCatalogContests();
+        fetchLeaderboard();
 
         // Optional realtime updates
         const gamesSubscription = supabase
@@ -74,8 +85,14 @@ export default function AdminDashboard() {
             .on('postgres_changes', { event: '*', schema: 'public', table: 'games' }, fetchGames)
             .subscribe();
 
+        const leaderboardSubscription = supabase
+            .channel('public:recipe_tests')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'recipe_tests' }, fetchLeaderboard)
+            .subscribe();
+
         return () => {
             supabase.removeChannel(gamesSubscription);
+            supabase.removeChannel(leaderboardSubscription);
         };
     }, []);
 
@@ -127,6 +144,15 @@ export default function AdminDashboard() {
     const fetchCatalogContests = async () => {
         const { data } = await supabase.from('catalog_contests').select('*').order('created_at', { ascending: false });
         if (data) setCatalogContests(data);
+    };
+
+    const fetchLeaderboard = async () => {
+        const { data } = await supabase
+            .from('recipe_tests')
+            .select('*, brigades!inner(id, name, code, game_id, games!inner(id, name))')
+            .order('global_score', { ascending: false })
+            .limit(50);
+        if (data) setLeaderboard(data);
     };
 
     const deleteCatalogItem = async (table: string, id: string, fetchFn: () => void) => {
@@ -718,6 +744,85 @@ export default function AdminDashboard() {
         }
     };
 
+    const openEditPlayer = (player: any) => {
+        setEditingPlayer({ ...player });
+        setIsEditPlayerOpen(true);
+    };
+
+    const updatePlayer = async () => {
+        if (!editingPlayer) return;
+        try {
+            await supabase
+                .from('players')
+                .update({
+                    name: editingPlayer.name,
+                    role: editingPlayer.role,
+                    brigade_id: editingPlayer.brigade_id
+                })
+                .eq('id', editingPlayer.id);
+            setIsEditPlayerOpen(false);
+            setEditingPlayer(null);
+            fetchPlayers();
+        } catch (error: any) {
+            console.error(error);
+            alert('Erreur lors de la mise à jour : ' + error.message);
+        }
+    };
+
+    const openSwapPlayer = (player: any) => {
+        setSwapSourcePlayer(player);
+        setSwapTargetPlayerId("");
+        setIsSwapPlayerOpen(true);
+    };
+
+    const swapPlayers = async () => {
+        if (!swapSourcePlayer || !swapTargetPlayerId) return;
+        try {
+            const targetPlayer = players.find(p => p.id === swapTargetPlayerId);
+            if (!targetPlayer) return;
+
+            const sourceBrigadeId = swapSourcePlayer.brigade_id;
+            const targetBrigadeId = targetPlayer.brigade_id;
+
+            await supabase.from('players').update({ brigade_id: targetBrigadeId }).eq('id', swapSourcePlayer.id);
+            await supabase.from('players').update({ brigade_id: sourceBrigadeId }).eq('id', targetPlayer.id);
+
+            setIsSwapPlayerOpen(false);
+            setSwapSourcePlayer(null);
+            setSwapTargetPlayerId("");
+            fetchPlayers();
+            alert('Échange effectué avec succès !');
+        } catch (error: any) {
+            console.error(error);
+            alert('Erreur lors de l\'échange : ' + error.message);
+        }
+    };
+
+    const openEditBrigade = (brigade: any) => {
+        setEditingBrigade({ ...brigade });
+        setIsEditBrigadeOpen(true);
+    };
+
+    const updateBrigade = async () => {
+        if (!editingBrigade) return;
+        try {
+            await supabase
+                .from('brigades')
+                .update({
+                    name: editingBrigade.name,
+                    code: editingBrigade.code,
+                    prestige_points: editingBrigade.prestige_points
+                })
+                .eq('id', editingBrigade.id);
+            setIsEditBrigadeOpen(false);
+            setEditingBrigade(null);
+            fetchBrigades();
+        } catch (error: any) {
+            console.error(error);
+            alert('Erreur lors de la mise à jour : ' + error.message);
+        }
+    };
+
     const deleteAllPlayers = async () => {
         if (!confirm("Attention, cela supprimera TOUS les joueurs. Continuer ?")) return;
         try {
@@ -818,6 +923,9 @@ export default function AdminDashboard() {
                         </TabsTrigger>
                         <TabsTrigger value="contests" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
                             <Database className="w-4 h-4 mr-3" /> CATALOG_CONTESTS
+                        </TabsTrigger>
+                        <TabsTrigger value="leaderboard" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
+                            <Database className="w-4 h-4 mr-3" /> LEADERBOARD
                         </TabsTrigger>
                         <TabsTrigger value="settings" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
                             <Settings className="w-4 h-4 mr-3" /> GLOBAL_CONFIG
@@ -1182,6 +1290,7 @@ export default function AdminDashboard() {
                                             <TableHead className="font-mono text-primary">NAME</TableHead>
                                             <TableHead className="font-mono text-primary">CODE</TableHead>
                                             <TableHead className="font-mono text-primary">PRESTIGE</TableHead>
+                                            <TableHead className="text-right font-mono text-primary">ACTIONS</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
@@ -1205,18 +1314,73 @@ export default function AdminDashboard() {
                                                     <TableCell className="font-bold">{b.name}</TableCell>
                                                     <TableCell className="font-mono text-secondary">{b.code}</TableCell>
                                                     <TableCell className="font-mono">{b.prestige_points}</TableCell>
+                                                    <TableCell className="text-right">
+                                                        <Button variant="ghost" size="icon" title="Modifier" onClick={() => openEditBrigade(b)} className="h-8 w-8 hover:text-primary"><Edit className="w-4 h-4" /></Button>
+                                                    </TableCell>
                                                 </TableRow>
                                             )
                                         })}
                                         {brigades.length === 0 && (
                                             <TableRow>
-                                                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground font-mono">NO BRIGADES FOUND</TableCell>
+                                                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground font-mono">NO BRIGADES FOUND</TableCell>
                                             </TableRow>
                                         )}
                                     </TableBody>
                                 </Table>
                             </CardContent>
                         </Card>
+
+                        {/* Edit Brigade Dialog */}
+                        <Dialog open={isEditBrigadeOpen} onOpenChange={setIsEditBrigadeOpen}>
+                            <DialogContent className="glass-panel border-white/10 bg-background/95 sm:max-w-[500px]">
+                                <DialogHeader>
+                                    <DialogTitle className="font-mono text-xl">Modifier la brigade</DialogTitle>
+                                    <DialogDescription>Modifiez les informations de la brigade.</DialogDescription>
+                                </DialogHeader>
+                                {editingBrigade && (
+                                    <div className="grid gap-4 py-4">
+                                        <div className="grid gap-2">
+                                            <Label className="font-mono text-muted-foreground">NOM</Label>
+                                            <Input
+                                                value={editingBrigade.name}
+                                                onChange={(e) => setEditingBrigade({ ...editingBrigade, name: e.target.value })}
+                                                className="bg-white/5 border-white/10 font-mono"
+                                            />
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label className="font-mono text-muted-foreground">CODE</Label>
+                                            <Input
+                                                value={editingBrigade.code}
+                                                onChange={(e) => setEditingBrigade({ ...editingBrigade, code: e.target.value })}
+                                                className="bg-white/5 border-white/10 font-mono"
+                                                maxLength={10}
+                                            />
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label className="font-mono text-muted-foreground">POINTS DE PRESTIGE</Label>
+                                            <Input
+                                                type="number"
+                                                value={editingBrigade.prestige_points}
+                                                onChange={(e) => setEditingBrigade({ ...editingBrigade, prestige_points: parseInt(e.target.value) || 0 })}
+                                                className="bg-white/5 border-white/10 font-mono"
+                                            />
+                                        </div>
+                                        <div className="p-3 bg-white/5 rounded-md border border-white/10">
+                                            <Label className="font-mono text-xs text-muted-foreground">PARTIE</Label>
+                                            <p className="font-mono text-sm mt-1">{games.find(g => g.id === editingBrigade.game_id)?.name || 'Unknown'}</p>
+                                        </div>
+                                    </div>
+                                )}
+                                <DialogFooter>
+                                    <Button variant="outline" onClick={() => setIsEditBrigadeOpen(false)} className="font-mono">
+                                        Annuler
+                                    </Button>
+                                    <Button onClick={updateBrigade} className="font-mono bg-primary hover:bg-primary/80">
+                                        Enregistrer
+                                    </Button>
+                                </DialogFooter>
+                            </DialogContent>
+                        </Dialog>
                     </TabsContent>
 
                     {/* PLAYERS TAB */}
@@ -1353,7 +1517,9 @@ export default function AdminDashboard() {
                                                     <TableCell className="font-mono text-secondary">{brigadeCode}</TableCell>
                                                     <TableCell className="font-mono text-xs text-muted-foreground">{p.role || "No Role"}</TableCell>
                                                     <TableCell className="font-mono text-xs text-muted-foreground">{gameName}</TableCell>
-                                                    <TableCell className="text-right">
+                                                    <TableCell className="text-right space-x-1">
+                                                        <Button variant="ghost" size="icon" title="Modifier" onClick={() => openEditPlayer(p)} className="h-8 w-8 hover:text-primary"><Edit className="w-4 h-4" /></Button>
+                                                        <Button variant="ghost" size="icon" title="Échanger" onClick={() => openSwapPlayer(p)} className="h-8 w-8 hover:text-secondary"><ArrowLeftRight className="w-4 h-4" /></Button>
                                                         <Button variant="ghost" size="icon" title="Supprimer" onClick={() => deletePlayer(p.id)} className="h-8 w-8 hover:text-destructive"><Trash2 className="w-4 h-4" /></Button>
                                                     </TableCell>
                                                 </TableRow>
@@ -1376,6 +1542,122 @@ export default function AdminDashboard() {
                                 </Table>
                             </CardContent>
                         </Card>
+
+                        {/* Edit Player Dialog */}
+                        <Dialog open={isEditPlayerOpen} onOpenChange={setIsEditPlayerOpen}>
+                            <DialogContent className="glass-panel border-white/10 bg-background/95 sm:max-w-[500px]">
+                                <DialogHeader>
+                                    <DialogTitle className="font-mono text-xl">Modifier le joueur</DialogTitle>
+                                    <DialogDescription>Modifiez les informations du joueur.</DialogDescription>
+                                </DialogHeader>
+                                {editingPlayer && (
+                                    <div className="grid gap-4 py-4">
+                                        <div className="grid gap-2">
+                                            <Label className="font-mono text-muted-foreground">NOM</Label>
+                                            <Input
+                                                value={editingPlayer.name}
+                                                onChange={(e) => setEditingPlayer({ ...editingPlayer, name: e.target.value })}
+                                                className="bg-white/5 border-white/10 font-mono"
+                                            />
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label className="font-mono text-muted-foreground">RÔLE</Label>
+                                            <select
+                                                className="flex h-10 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary font-mono"
+                                                value={editingPlayer.role || ""}
+                                                onChange={(e) => setEditingPlayer({ ...editingPlayer, role: e.target.value })}
+                                            >
+                                                <option value="" className="bg-background text-muted-foreground">Aucun rôle</option>
+                                                {catalogRoles.map(r => (
+                                                    <option key={r.id} value={r.title} className="bg-background text-white">{r.title}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label className="font-mono text-muted-foreground">BRIGADE</Label>
+                                            <select
+                                                className="flex h-10 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary font-mono"
+                                                value={editingPlayer.brigade_id}
+                                                onChange={(e) => setEditingPlayer({ ...editingPlayer, brigade_id: e.target.value })}
+                                            >
+                                                {brigades.map(b => {
+                                                    const game = games.find(g => g.id === b.game_id);
+                                                    return (
+                                                        <option key={b.id} value={b.id} className="bg-background text-white">
+                                                            {game?.name} - {b.name} ({b.code})
+                                                        </option>
+                                                    );
+                                                })}
+                                            </select>
+                                        </div>
+                                    </div>
+                                )}
+                                <DialogFooter>
+                                    <Button variant="outline" onClick={() => setIsEditPlayerOpen(false)} className="font-mono">
+                                        Annuler
+                                    </Button>
+                                    <Button onClick={updatePlayer} className="font-mono bg-primary hover:bg-primary/80">
+                                        Enregistrer
+                                    </Button>
+                                </DialogFooter>
+                            </DialogContent>
+                        </Dialog>
+
+                        {/* Swap Player Dialog */}
+                        <Dialog open={isSwapPlayerOpen} onOpenChange={setIsSwapPlayerOpen}>
+                            <DialogContent className="glass-panel border-white/10 bg-background/95 sm:max-w-[500px]">
+                                <DialogHeader>
+                                    <DialogTitle className="font-mono text-xl">Échanger deux joueurs</DialogTitle>
+                                    <DialogDescription>
+                                        Les deux joueurs échangeront leurs brigades respectives.
+                                    </DialogDescription>
+                                </DialogHeader>
+                                {swapSourcePlayer && (
+                                    <div className="grid gap-4 py-4">
+                                        <div className="p-3 bg-white/5 rounded-md border border-white/10">
+                                            <Label className="font-mono text-xs text-muted-foreground">JOUEUR SOURCE</Label>
+                                            <p className="font-mono font-bold mt-1">{swapSourcePlayer.name}</p>
+                                            <p className="font-mono text-xs text-muted-foreground mt-1">
+                                                {brigades.find(b => b.id === swapSourcePlayer.brigade_id)?.name} ({brigades.find(b => b.id === swapSourcePlayer.brigade_id)?.code})
+                                            </p>
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label className="font-mono text-muted-foreground">JOUEUR CIBLE</Label>
+                                            <select
+                                                className="flex h-10 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary font-mono"
+                                                value={swapTargetPlayerId}
+                                                onChange={(e) => setSwapTargetPlayerId(e.target.value)}
+                                            >
+                                                <option value="" disabled className="bg-background text-muted-foreground">Sélectionner un joueur...</option>
+                                                {players
+                                                    .filter(p => p.id !== swapSourcePlayer.id)
+                                                    .map(p => {
+                                                        const brigade = brigades.find(b => b.id === p.brigade_id);
+                                                        const game = games.find(g => g.id === brigade?.game_id);
+                                                        return (
+                                                            <option key={p.id} value={p.id} className="bg-background text-white">
+                                                                {p.name} - {game?.name} - {brigade?.name} ({brigade?.code})
+                                                            </option>
+                                                        );
+                                                    })}
+                                            </select>
+                                        </div>
+                                    </div>
+                                )}
+                                <DialogFooter>
+                                    <Button variant="outline" onClick={() => setIsSwapPlayerOpen(false)} className="font-mono">
+                                        Annuler
+                                    </Button>
+                                    <Button 
+                                        onClick={swapPlayers} 
+                                        disabled={!swapTargetPlayerId}
+                                        className="font-mono bg-secondary hover:bg-secondary/80"
+                                    >
+                                        Échanger
+                                    </Button>
+                                </DialogFooter>
+                            </DialogContent>
+                        </Dialog>
                     </TabsContent>
 
                     {/* ROLES TAB */}
@@ -1468,6 +1750,81 @@ export default function AdminDashboard() {
                                                 </TableCell>
                                             </TableRow>
                                         ))}
+                                    </TableBody>
+                                </Table>
+                            </CardContent>
+                        </Card>
+                    </TabsContent>
+
+                    {/* LEADERBOARD TAB */}
+                    <TabsContent value="leaderboard" className="mt-0 space-y-6">
+                        <div className="flex justify-between items-center bg-background z-10 sticky top-0 py-2">
+                            <div>
+                                <h2 className="text-2xl font-bold font-mono text-white">Global Leaderboard</h2>
+                                <p className="text-muted-foreground text-sm">Classement en direct des meilleurs scores de toutes les brigades.</p>
+                            </div>
+                            <Button variant="outline" className="font-mono text-xs" onClick={fetchLeaderboard}>
+                                🔄 REFRESH
+                            </Button>
+                        </div>
+
+                        <Card className="glass-panel border-white/10 bg-background/50">
+                            <CardContent className="p-0">
+                                <Table>
+                                    <TableHeader className="bg-white/5">
+                                        <TableRow className="border-white/10 hover:bg-transparent">
+                                            <TableHead className="font-mono text-primary w-20">RANK</TableHead>
+                                            <TableHead className="font-mono text-primary">BRIGADE</TableHead>
+                                            <TableHead className="font-mono text-primary">CODE</TableHead>
+                                            <TableHead className="font-mono text-primary">GAME</TableHead>
+                                            <TableHead className="font-mono text-primary text-right">SCORE</TableHead>
+                                            <TableHead className="font-mono text-primary">DATE</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {leaderboard.map((entry, index) => {
+                                            const brigade = entry.brigades;
+                                            const game = brigade?.games;
+                                            return (
+                                                <TableRow key={entry.id} className="border-white/10 hover:bg-white/5">
+                                                    <TableCell className="font-mono font-bold text-lg">
+                                                        {index === 0 && <span className="text-yellow-500">🥇</span>}
+                                                        {index === 1 && <span className="text-gray-400">🥈</span>}
+                                                        {index === 2 && <span className="text-orange-600">🥉</span>}
+                                                        {index > 2 && <span className="text-muted-foreground">#{index + 1}</span>}
+                                                    </TableCell>
+                                                    <TableCell className="font-bold">{brigade?.name || 'Unknown'}</TableCell>
+                                                    <TableCell className="font-mono text-secondary">{brigade?.code || 'N/A'}</TableCell>
+                                                    <TableCell className="font-mono text-xs text-muted-foreground">{game?.name || 'Unknown Game'}</TableCell>
+                                                    <TableCell className="text-right">
+                                                        <span className={`font-mono font-bold text-lg ${
+                                                            entry.global_score >= 90 ? 'text-green-500' :
+                                                            entry.global_score >= 70 ? 'text-yellow-500' :
+                                                            entry.global_score >= 50 ? 'text-orange-500' :
+                                                            'text-red-500'
+                                                        }`}>
+                                                            {entry.global_score}
+                                                        </span>
+                                                        <span className="text-muted-foreground text-sm">/100</span>
+                                                    </TableCell>
+                                                    <TableCell className="font-mono text-xs text-muted-foreground">
+                                                        {new Date(entry.created_at).toLocaleString('fr-FR', { 
+                                                            day: '2-digit', 
+                                                            month: '2-digit', 
+                                                            hour: '2-digit', 
+                                                            minute: '2-digit' 
+                                                        })}
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })}
+                                        {leaderboard.length === 0 && (
+                                            <TableRow>
+                                                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground font-mono">
+                                                    NO SCORES YET
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
                                     </TableBody>
                                 </Table>
                             </CardContent>
