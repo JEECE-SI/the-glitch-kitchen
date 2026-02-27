@@ -1119,7 +1119,9 @@ export default function PlayerDashboard() {
                             <CardContent>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {players.map((p, i) => {
-                                        const roleInfo = catalogRoles.find(r => r.title === p.role);
+                                        // Extract role title from formats like "Le Chef" or "Le Contrôleur (Resp. Qualité)"
+                                        const roleTitle = p.role?.split('(')[0]?.trim() || p.role;
+                                        const roleInfo = catalogRoles.find(r => r.title === roleTitle || r.title === p.role);
                                         return (
                                             <div key={i} className="relative overflow-hidden rounded-xl border border-white/10 bg-white/5 p-5 flex flex-col gap-3 group hover:bg-white/8 hover:border-secondary/30 transition-all duration-200">
                                                 {/* Background accent */}
@@ -1130,26 +1132,30 @@ export default function PlayerDashboard() {
                                                         <div className="w-10 h-10 rounded-full bg-secondary/15 border border-secondary/30 flex items-center justify-center shrink-0">
                                                             <Shield className="w-5 h-5 text-secondary/70" />
                                                         </div>
-                                                        <div>
+                                                        <div className="flex-1">
                                                             <p className="font-bold text-white leading-tight">{p.name}</p>
                                                             {p.role_used && <Badge variant="destructive" className="mt-1 text-[9px] font-mono px-1.5 py-0">POUVOIR UTILISÉ</Badge>}
                                                         </div>
                                                     </div>
                                                 </div>
                                                 {/* Role info */}
-                                                {roleInfo ? (
-                                                    <div className="border-t border-white/5 pt-3 space-y-2">
-                                                        <div className="flex items-center justify-between">
-                                                            <span className="font-mono text-xs font-bold text-primary">{roleInfo.title}</span>
-                                                            <span className="font-mono text-[10px] bg-primary/15 text-primary border border-primary/30 px-2 py-0.5 rounded-full">{roleInfo.power_name}</span>
-                                                        </div>
-                                                        <p className="text-[11px] text-white/50 leading-relaxed">{roleInfo.description}</p>
-                                                    </div>
-                                                ) : (
-                                                    <div className="border-t border-white/5 pt-3">
+                                                <div className="border-t border-white/5 pt-3 space-y-2">
+                                                    {roleInfo ? (
+                                                        <>
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <span className="font-mono text-xs font-bold text-primary">{p.role}</span>
+                                                                {roleInfo.power_name && (
+                                                                    <span className="font-mono text-[10px] bg-primary/15 text-primary border border-primary/30 px-2 py-0.5 rounded-full whitespace-nowrap">{roleInfo.power_name}</span>
+                                                                )}
+                                                            </div>
+                                                            {roleInfo.description && (
+                                                                <p className="text-xs text-white/70 leading-relaxed">{roleInfo.description}</p>
+                                                            )}
+                                                        </>
+                                                    ) : (
                                                         <span className="font-mono text-xs text-white/30 italic">{p.role || "NON ASSIGNÉ"}</span>
-                                                    </div>
-                                                )}
+                                                    )}
+                                                </div>
                                             </div>
                                         );
                                     })}
