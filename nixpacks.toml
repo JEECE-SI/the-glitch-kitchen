@@ -1,11 +1,19 @@
+[variables]
+NODE_ENV = "production"
+
 [phases.setup]
-nixPkgs = ["nodejs_20", "pnpm"]
+nixPkgs = ["nodejs_20"]
+nixLibs = ["glibc"]
 
 [phases.install]
-cmds = ["pnpm install --frozen-lockfile"]
+cmds = [
+  "corepack enable",
+  "corepack prepare pnpm@9.15.4 --activate",
+  "pnpm install --frozen-lockfile --prod=false"
+]
 
 [phases.build]
 cmds = ["pnpm run build"]
 
 [start]
-cmd = "pnpm start"
+cmd = "node .next/standalone/server.js"
