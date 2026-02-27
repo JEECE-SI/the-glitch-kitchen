@@ -1,19 +1,23 @@
 [variables]
 NODE_ENV = "production"
+NEXT_TELEMETRY_DISABLED = "1"
 
 [phases.setup]
-nixPkgs = ["nodejs_20"]
-nixLibs = ["glibc"]
+nixPkgs = ["nodejs_20", "bash"]
 
 [phases.install]
 cmds = [
   "corepack enable",
   "corepack prepare pnpm@9.15.4 --activate",
-  "pnpm install --frozen-lockfile --prod=false"
+  "pnpm install --frozen-lockfile"
 ]
 
 [phases.build]
-cmds = ["pnpm run build"]
+cmds = [
+  "pnpm run build",
+  "cp -r .next/standalone/* . || cp -r .next/standalone/. .",
+  "cp -r .next/static .next/ || true"
+]
 
 [start]
-cmd = "node .next/standalone/server.js"
+cmd = "node server.js"
