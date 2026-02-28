@@ -653,74 +653,70 @@ export default function PlayerDashboard() {
             <div className="absolute bottom-0 left-0 w-1/3 h-1/3 bg-secondary/5 rounded-full blur-3xl -z-10" />
 
             {/* Header Info */}
-            <header className="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-4 border-b border-white/5 mb-4">
-                <div>
-                    <h1 className="text-2xl md:text-3xl font-black tracking-widest font-mono text-transparent bg-clip-text bg-gradient-to-r from-white to-white/50 border-l-4 border-primary pl-4">
+            <header className="flex flex-col gap-3 pb-4 border-b border-white/5 mb-4">
+                <div className="flex items-center justify-between">
+                    <h1 className="text-xl md:text-2xl lg:text-3xl font-black tracking-widest font-mono text-transparent bg-clip-text bg-gradient-to-r from-white to-white/50 border-l-4 border-primary pl-3 md:pl-4">
                         {brigadeName ? brigadeName.toUpperCase() : `BRIGADE_${brigadeId}`}
                     </h1>
-
+                    <Card className="bg-white/5 border-secondary/20">
+                        <CardContent className="p-2 md:p-3 flex flex-col items-center justify-center min-w-[80px] md:min-w-[100px]">
+                            <span className="text-[9px] md:text-[10px] text-secondary font-mono font-bold mb-1">FRAGMENTS</span>
+                            <span className="text-xl md:text-2xl font-black font-mono">{inventory.filter(s => s.fragment_data).length}<span className="text-muted-foreground text-xs md:text-sm">/50</span></span>
+                        </CardContent>
+                    </Card>
                 </div>
-                <div className="flex gap-2 w-full md:w-auto mt-4 md:mt-0">
+                <div className="flex gap-2 w-full">
                     <Input
                         placeholder="CODE FRAGMENT..."
                         value={decryptInput}
                         onChange={e => setDecryptInput(e.target.value)}
-                        className="bg-white/5 border-secondary/20 font-mono text-secondary uppercase w-48"
+                        className="bg-white/5 border-secondary/20 font-mono text-secondary uppercase flex-1 text-xs md:text-sm"
                     />
                     <Button
                         onClick={handleDecrypt}
                         disabled={isDecrypting || !decryptInput}
-                        className="bg-secondary hover:bg-secondary/80 text-secondary-foreground font-mono"
+                        className="bg-secondary hover:bg-secondary/80 text-secondary-foreground font-mono text-xs md:text-sm"
                     >
                         {isDecrypting ? "..." : "DECRYPT"}
                     </Button>
-                </div>
-
-                <div className="flex gap-2 mt-4 md:mt-0 w-full md:w-auto justify-end">
-                    <Card className="bg-white/5 border-secondary/20">
-                        <CardContent className="p-3 flex flex-col items-center justify-center min-w-[100px]">
-                            <span className="text-[10px] text-secondary font-mono font-bold mb-1">FRAGMENTS</span>
-                            <span className="text-2xl font-black font-mono">{inventory.filter(s => s.fragment_data).length}<span className="text-muted-foreground text-sm">/50</span></span>
-                        </CardContent>
-                    </Card>
                 </div>
             </header>
 
             {/* Main Content */}
             <div className="flex-1 max-w-6xl mx-auto w-full">
                 <Tabs defaultValue="intel" onValueChange={setActiveTab} className="w-full">
-                    <TabsList className="grid w-full grid-cols-1 md:grid-cols-3 mb-4 bg-white/5 border border-white/10 p-1 rounded-xl gap-1">
-                        <TabsTrigger value="intel" className="font-mono text-xs md:text-sm data-[state=active]:bg-primary/20 glass-panel h-auto py-2">INTEL_FEED</TabsTrigger>
-                        <TabsTrigger value="recipe" className="font-mono text-xs md:text-sm data-[state=active]:bg-green-500/20 glass-panel h-auto py-2">RECIPE_ASSEMBLY</TabsTrigger>
-                        <TabsTrigger value="roster" className="font-mono text-xs md:text-sm data-[state=active]:bg-secondary/20 glass-panel h-auto py-2">BRIGADE_ROSTER</TabsTrigger>
+                    <TabsList className="grid w-full grid-cols-3 mb-4 bg-white/5 border border-white/10 p-1 rounded-xl gap-1">
+                        <TabsTrigger value="intel" className="font-mono text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-primary/20 glass-panel h-auto py-2"><span className="hidden sm:inline">INTEL_FEED</span><span className="sm:hidden">INTEL</span></TabsTrigger>
+                        <TabsTrigger value="recipe" className="font-mono text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-green-500/20 glass-panel h-auto py-2"><span className="hidden sm:inline">RECIPE_ASSEMBLY</span><span className="sm:hidden">RECIPE</span></TabsTrigger>
+                        <TabsTrigger value="roster" className="font-mono text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-secondary/20 glass-panel h-auto py-2"><span className="hidden sm:inline">BRIGADE_ROSTER</span><span className="sm:hidden">ROSTER</span></TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="intel" className="space-y-6">
                         {/* CURRENT GAME STATUS WIDGET */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="bg-white/5 border border-white/10 p-4 rounded-xl flex flex-col justify-center items-center">
-                                <span className="text-[10px] text-muted-foreground font-mono font-bold mb-1">CYCLE EN COURS</span>
-                                <span className="text-xl font-black font-mono text-white">CYCLE {currentCycle}/4</span>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
+                            <div className="bg-white/5 border border-white/10 p-2 md:p-4 rounded-xl flex flex-col justify-center items-center">
+                                <span className="text-[8px] md:text-[10px] text-muted-foreground font-mono font-bold mb-1">CYCLE</span>
+                                <span className="text-base md:text-xl font-black font-mono text-white">{currentCycle}/4</span>
                             </div>
-                            <div className="bg-white/5 border border-white/10 p-4 rounded-xl flex flex-col justify-center items-center">
-                                <span className="text-[10px] text-muted-foreground font-mono font-bold mb-1">ÉTAPE</span>
-                                <span className="text-sm font-black font-mono text-primary text-center">{phaseName}</span>
+                            <div className="bg-white/5 border border-white/10 p-2 md:p-4 rounded-xl flex flex-col justify-center items-center">
+                                <span className="text-[8px] md:text-[10px] text-muted-foreground font-mono font-bold mb-1">ÉTAPE</span>
+                                <span className="text-[10px] md:text-sm font-black font-mono text-primary text-center leading-tight">{phaseName}</span>
                             </div>
-                            <div className="bg-white/5 border border-white/10 p-4 rounded-xl flex flex-col justify-center items-center">
-                                <span className="text-[10px] text-muted-foreground font-mono font-bold mb-1">TIMER CYCLE</span>
-                                <span className={`text-2xl font-black font-mono ${cycleTimer <= 60 && isTimerRunning && cycleTimer > 0 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                            <div className="bg-white/5 border border-white/10 p-2 md:p-4 rounded-xl flex flex-col justify-center items-center">
+                                <span className="text-[8px] md:text-[10px] text-muted-foreground font-mono font-bold mb-1">TIMER</span>
+                                <span className={`text-lg md:text-2xl font-black font-mono ${cycleTimer <= 60 && isTimerRunning && cycleTimer > 0 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
                                     {formatTime(cycleTimer)}
                                 </span>
                             </div>
-                            <div className="bg-white/5 border border-white/10 p-4 rounded-xl flex flex-col justify-center items-center flex-1">
-                                <span className="text-[10px] text-muted-foreground font-mono font-bold mb-1">TIMER GLOBAL</span>
-                                <span className="text-xl font-black font-mono text-white/70">
+                            <div className="bg-white/5 border border-white/10 p-2 md:p-4 rounded-xl flex flex-col justify-center items-center flex-1">
+                                <span className="text-[8px] md:text-[10px] text-muted-foreground font-mono font-bold mb-1">GLOBAL</span>
+                                <span className="text-base md:text-xl font-black font-mono text-white/70">
                                     {formatTime(globalTimer)}
                                 </span>
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
                             {/* Logs - left */}
                             <Card className="glass-panel border-white/10 bg-background/50 h-[400px] flex flex-col lg:col-span-2">
                                 <CardHeader className="border-b border-white/5 pb-4">
@@ -830,13 +826,14 @@ export default function PlayerDashboard() {
                     </TabsContent>
 
                     <TabsContent value="recipe" className="space-y-4">
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 border-b border-white/10 pb-4 gap-4">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 border-b border-white/10 pb-4 gap-3">
                             <div>
-                                <h2 className="text-xl font-bold font-mono text-white flex items-center gap-2">
-                                    <ListOrdered className="w-5 h-5 text-green-500" />
-                                    RECIPE_ASSEMBLY_LAB
+                                <h2 className="text-lg md:text-xl font-bold font-mono text-white flex items-center gap-2">
+                                    <ListOrdered className="w-4 h-4 md:w-5 md:h-5 text-green-500" />
+                                    <span className="hidden sm:inline">RECIPE_ASSEMBLY_LAB</span>
+                                    <span className="sm:hidden">RECIPE_LAB</span>
                                 </h2>
-                                <p className="text-xs text-muted-foreground font-mono mt-1">Drag and drop fragments to assign them to recipe steps. Auto-saved.</p>
+                                <p className="text-[10px] md:text-xs text-muted-foreground font-mono mt-1">Drag & drop fragments. Auto-saved.</p>
                             </div>
                             <div className="flex items-center gap-3">
                                 <div className="flex items-center gap-1.5">
@@ -895,7 +892,7 @@ export default function PlayerDashboard() {
                             </div>
                         )}
 
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 items-start">
                             {/* Left Panel: Inventory (1/3) */}
                             <Card className="glass-panel border-white/10 lg:col-span-1 sticky top-4">
                                 <CardHeader className="py-4 border-b border-white/5">

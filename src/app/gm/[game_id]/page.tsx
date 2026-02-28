@@ -60,20 +60,22 @@ export default function GameMasterDashboard() {
 
     return (
         <div className="min-h-screen flex flex-col p-4 md:p-8">
-            <header className="flex items-center justify-between pb-8">
+            <header className="flex flex-col md:flex-row items-start md:items-center justify-between pb-4 md:pb-8 gap-3 md:gap-0">
                 <div>
-                    <h1 className="text-3xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary flex items-center gap-3">
-                        <ShieldAlert className="w-8 h-8 text-primary" />
-                        GM_TERMINAL : {game.name}
+                    <h1 className="text-xl md:text-2xl lg:text-3xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary flex items-center gap-2 md:gap-3">
+                        <ShieldAlert className="w-6 h-6 md:w-8 md:h-8 text-primary" />
+                        <span className="hidden sm:inline">GM_TERMINAL : {game.name}</span>
+                        <span className="sm:hidden">GM : {game.name}</span>
                     </h1>
-                    <p className="text-muted-foreground font-mono text-sm mt-1">STATUS: {game.status.toUpperCase()}</p>
+                    <p className="text-muted-foreground font-mono text-xs md:text-sm mt-1">STATUS: {game.status.toUpperCase()}</p>
                 </div>
-                <div className="flex gap-4">
-                    <Button variant="outline" className="font-mono text-muted-foreground" onClick={() => router.push('/admin')}>
-                        <ArrowLeft className="w-4 h-4 mr-2" />
-                        BACK TO ADMIN
+                <div className="flex gap-2 md:gap-4 w-full md:w-auto">
+                    <Button variant="outline" className="font-mono text-muted-foreground text-xs md:text-sm flex-1 md:flex-none" onClick={() => router.push('/admin')}>
+                        <ArrowLeft className="w-4 h-4 mr-1 md:mr-2" />
+                        <span className="hidden sm:inline">BACK TO ADMIN</span>
+                        <span className="sm:hidden">BACK</span>
                     </Button>
-                    <Button onClick={advancePhase} className="font-mono bg-destructive hover:bg-destructive/80 text-white">
+                    <Button onClick={advancePhase} className="font-mono bg-destructive hover:bg-destructive/80 text-white text-xs md:text-sm flex-1 md:flex-none">
                         ADVANCE_PHASE
                     </Button>
                 </div>
@@ -82,15 +84,15 @@ export default function GameMasterDashboard() {
             <div className="flex-1 border rounded-lg glass-panel overflow-hidden">
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
                     <div className="border-b px-4 py-3 bg-white/5">
-                        <TabsList className="bg-transparent space-x-2">
-                            <TabsTrigger value="overview" className="data-[state=active]:bg-primary/20"><Activity className="w-4 h-4 mr-2" /> OVERVIEW</TabsTrigger>
-                            <TabsTrigger value="brigades" className="data-[state=active]:bg-primary/20"><Users className="w-4 h-4 mr-2" /> BRIGADES</TabsTrigger>
+                        <TabsList className="bg-transparent flex-wrap gap-2">
+                            <TabsTrigger value="overview" className="data-[state=active]:bg-primary/20 text-xs md:text-sm"><Activity className="w-4 h-4 mr-1 md:mr-2" /> OVERVIEW</TabsTrigger>
+                            <TabsTrigger value="brigades" className="data-[state=active]:bg-primary/20 text-xs md:text-sm"><Users className="w-4 h-4 mr-1 md:mr-2" /> BRIGADES</TabsTrigger>
                         </TabsList>
                     </div>
 
-                    <div className="flex-1 p-6 overflow-auto">
-                        <TabsContent value="overview" className="mt-0 h-full flex flex-col gap-6">
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="flex-1 p-4 md:p-6 overflow-auto">
+                        <TabsContent value="overview" className="mt-0 h-full flex flex-col gap-4 md:gap-6">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
                                 <Card className="bg-white/5 border-white/10">
                                     <CardHeader className="pb-2">
                                         <CardTitle className="text-sm text-muted-foreground font-mono">CURRENT_PHASE</CardTitle>
@@ -125,7 +127,7 @@ export default function GameMasterDashboard() {
                                 </Card>
                             </div>
 
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1">
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 flex-1">
                                 <Card className="bg-white/5 border-white/10 flex flex-col">
                                     <CardHeader>
                                         <CardTitle>Recent Network Activity</CardTitle>

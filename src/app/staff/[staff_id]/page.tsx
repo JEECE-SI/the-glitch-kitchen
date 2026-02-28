@@ -647,31 +647,33 @@ export default function StaffDashboard() {
             <div className="absolute top-0 right-0 w-1/4 h-1/4 bg-blue-500/5 rounded-full blur-3xl -z-10" />
             <div className="absolute bottom-0 left-0 w-1/4 h-1/4 bg-purple-500/5 rounded-full blur-3xl -z-10" />
 
-            <header className="flex flex-col md:flex-row items-center justify-between pb-6 border-b border-white/10 mb-6">
-                <div>
-                    <h1 className="text-2xl md:text-3xl font-black tracking-widest font-mono text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 flex items-center gap-3">
-                        <Shield className="w-8 h-8 text-blue-500" />
-                        STAFF_CONTROL // {game.name}
+            <header className="flex flex-col md:flex-row items-start md:items-center justify-between pb-4 md:pb-6 border-b border-white/10 mb-4 md:mb-6">
+                <div className="mb-3 md:mb-0">
+                    <h1 className="text-xl md:text-2xl lg:text-3xl font-black tracking-widest font-mono text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 flex items-center gap-2 md:gap-3">
+                        <Shield className="w-6 h-6 md:w-8 md:h-8 text-blue-500" />
+                        <span className="hidden sm:inline">STAFF_CONTROL // {game.name}</span>
+                        <span className="sm:hidden">STAFF // {game.name}</span>
                     </h1>
-                    <p className="text-muted-foreground font-mono text-sm mt-1">INSTANCE ID: {game.id.split('-')[0]}... | CYCLE: {currentCycle}/4</p>
+                    <p className="text-muted-foreground font-mono text-xs md:text-sm mt-1">ID: {game.id.split('-')[0]}... | C: {currentCycle}/4</p>
                 </div>
-                <div className="mt-4 md:mt-0 flex gap-4">
-                    <Button variant="destructive" className="font-mono text-xs shadow-[0_0_15px_-3px_rgba(239,68,68,0.4)]" onClick={handleResetInstance}>
-                        <AlertTriangle className="w-4 h-4 mr-2" />
-                        RESET INSTANCE
+                <div className="flex gap-2 md:gap-4 w-full md:w-auto">
+                    <Button variant="destructive" className="font-mono text-xs flex-1 md:flex-none shadow-[0_0_15px_-3px_rgba(239,68,68,0.4)]" onClick={handleResetInstance}>
+                        <AlertTriangle className="w-4 h-4 mr-1 md:mr-2" />
+                        <span className="hidden sm:inline">RESET INSTANCE</span>
+                        <span className="sm:hidden">RESET</span>
                     </Button>
-                    <Button variant="outline" className="font-mono text-xs border-white/20 hover:bg-white/5" onClick={() => router.push("/")}>
+                    <Button variant="outline" className="font-mono text-xs flex-1 md:flex-none border-white/20 hover:bg-white/5" onClick={() => router.push("/")}>
                         LOGOUT
                     </Button>
                 </div>
             </header>
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col w-full max-w-7xl mx-auto">
-                <TabsList className="grid w-full grid-cols-4 bg-white/5 border border-white/10">
-                    <TabsTrigger value="control" className="data-[state=active]:bg-primary/20 font-mono">GAME_CONTROL</TabsTrigger>
-                    <TabsTrigger value="rankings" className="data-[state=active]:bg-primary/20 font-mono">RANKINGS</TabsTrigger>
-                    <TabsTrigger value="players" className="data-[state=active]:bg-primary/20 font-mono">PLAYERS</TabsTrigger>
-                    <TabsTrigger value="brigades" className="data-[state=active]:bg-primary/20 font-mono">BRIGADES</TabsTrigger>
+                <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 bg-white/5 border border-white/10">
+                    <TabsTrigger value="control" className="data-[state=active]:bg-primary/20 font-mono text-xs md:text-sm"><span className="hidden sm:inline">GAME_CONTROL</span><span className="sm:hidden">CONTROL</span></TabsTrigger>
+                    <TabsTrigger value="rankings" className="data-[state=active]:bg-primary/20 font-mono text-xs md:text-sm">RANKINGS</TabsTrigger>
+                    <TabsTrigger value="players" className="data-[state=active]:bg-primary/20 font-mono text-xs md:text-sm">PLAYERS</TabsTrigger>
+                    <TabsTrigger value="brigades" className="data-[state=active]:bg-primary/20 font-mono text-xs md:text-sm">BRIGADES</TabsTrigger>
                 </TabsList>
 
                 {/* GAME CONTROL TAB */}
@@ -729,7 +731,7 @@ export default function StaffDashboard() {
                                 </CardContent>
                             </Card>
 
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
                                 {/* TIMER & MAIN CONTROLS */}
                                 <Card className="glass-panel border-white/10 bg-background/50 lg:col-span-2">
                                     <CardHeader className="border-b border-white/5 pb-4">
@@ -741,17 +743,17 @@ export default function StaffDashboard() {
                                             {currentPhase !== 'setup' ? PHASE_CONFIG[currentPhase as keyof typeof PHASE_CONFIG]?.title : "EN ATTENTE"}
                                         </CardDescription>
                                     </CardHeader>
-                                    <CardContent className="p-8 flex flex-col items-center justify-center">
-                                        <div className={`text-7xl md:text-9xl font-black font-mono tracking-tighter transition-colors ${timeLeft <= 60 && timerActive && timeLeft > 0 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                                    <CardContent className="p-4 md:p-8 flex flex-col items-center justify-center">
+                                        <div className={`text-5xl md:text-7xl lg:text-9xl font-black font-mono tracking-tighter transition-colors ${timeLeft <= 60 && timerActive && timeLeft > 0 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
                                             {formatTime(timeLeft)}
                                         </div>
-                                        <div className="flex gap-4 mt-8">
-                                            <Button size="lg" onClick={toggleTimer} className="font-mono bg-white/10 hover:bg-white/20 border border-white/20 h-16 w-16 p-0 rounded-full flex items-center justify-center" disabled={currentPhase === 'setup'}>
-                                                {timerActive ? <Pause className="w-8 h-8" /> : <Play className="w-8 h-8 ml-1" />}
+                                        <div className="flex flex-wrap gap-2 md:gap-4 mt-4 md:mt-8 justify-center">
+                                            <Button size="lg" onClick={toggleTimer} className="font-mono bg-white/10 hover:bg-white/20 border border-white/20 h-12 w-12 md:h-16 md:w-16 p-0 rounded-full flex items-center justify-center" disabled={currentPhase === 'setup'}>
+                                                {timerActive ? <Pause className="w-6 h-6 md:w-8 md:h-8" /> : <Play className="w-6 h-6 md:w-8 md:h-8 ml-1" />}
                                             </Button>
-                                            <Button size="lg" onClick={() => adjustTime(60)} variant="outline" className="font-mono h-16 px-6 border-white/20">+1 MIN</Button>
-                                            <Button size="lg" onClick={() => adjustTime(-60)} variant="outline" className="font-mono h-16 px-6 border-white/20">-1 MIN</Button>
-                                            <Button size="lg" onClick={resetPhaseTimer} variant="outline" className="font-mono h-16 px-6 border-white/20 bg-red-500/10 hover:bg-red-500/20 text-red-500 hover:text-red-400" disabled={currentPhase === 'setup'}>RESET</Button>
+                                            <Button size="lg" onClick={() => adjustTime(60)} variant="outline" className="font-mono h-12 md:h-16 px-4 md:px-6 border-white/20 text-xs md:text-sm">+1 MIN</Button>
+                                            <Button size="lg" onClick={() => adjustTime(-60)} variant="outline" className="font-mono h-12 md:h-16 px-4 md:px-6 border-white/20 text-xs md:text-sm">-1 MIN</Button>
+                                            <Button size="lg" onClick={resetPhaseTimer} variant="outline" className="font-mono h-12 md:h-16 px-4 md:px-6 border-white/20 bg-red-500/10 hover:bg-red-500/20 text-red-500 hover:text-red-400 text-xs md:text-sm" disabled={currentPhase === 'setup'}>RESET</Button>
                                         </div>
                                     </CardContent>
                                     <div className="border-t border-white/5 bg-white/5 grid grid-cols-3 divide-x divide-white/10">

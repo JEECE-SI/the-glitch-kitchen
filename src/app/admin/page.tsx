@@ -972,27 +972,27 @@ export default function AdminDashboard() {
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col md:flex-row gap-4">
                 <div className="w-full md:w-48 shrink-0">
-                    <TabsList className="flex flex-col h-auto bg-transparent items-stretch space-y-1">
-                        <TabsTrigger value="dashboard" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-2 text-xs">
-                            <Database className="w-3 h-3 mr-2" /> DASHBOARD
+                    <TabsList className="flex md:flex-col flex-row overflow-x-auto h-auto bg-transparent items-stretch md:space-y-1 space-x-1 md:space-x-0">
+                        <TabsTrigger value="dashboard" className="justify-start whitespace-nowrap data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 md:border-l-4 border-l-0 border-b-2 md:border-b-0 border-transparent border-primary font-mono py-2 text-xs">
+                            <Database className="w-3 h-3 mr-1 md:mr-2" /> <span className="hidden sm:inline">DASHBOARD</span><span className="sm:hidden">DASH</span>
                         </TabsTrigger>
-                        <TabsTrigger value="games" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-2 text-xs">
-                            <Database className="w-3 h-3 mr-2" /> GAMES
+                        <TabsTrigger value="games" className="justify-start whitespace-nowrap data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 md:border-l-4 border-l-0 border-b-2 md:border-b-0 border-transparent border-primary font-mono py-2 text-xs">
+                            <Database className="w-3 h-3 mr-1 md:mr-2" /> GAMES
                         </TabsTrigger>
-                        <TabsTrigger value="brigades" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-2 text-xs">
-                            <Users className="w-3 h-3 mr-2" /> BRIGADES
+                        <TabsTrigger value="brigades" className="justify-start whitespace-nowrap data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 md:border-l-4 border-l-0 border-b-2 md:border-b-0 border-transparent border-primary font-mono py-2 text-xs">
+                            <Users className="w-3 h-3 mr-1 md:mr-2" /> <span className="hidden sm:inline">BRIGADES</span><span className="sm:hidden">BRIG</span>
                         </TabsTrigger>
-                        <TabsTrigger value="players" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-2 text-xs">
-                            <Users className="w-3 h-3 mr-2" /> PLAYERS
+                        <TabsTrigger value="players" className="justify-start whitespace-nowrap data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 md:border-l-4 border-l-0 border-b-2 md:border-b-0 border-transparent border-primary font-mono py-2 text-xs">
+                            <Users className="w-3 h-3 mr-1 md:mr-2" /> <span className="hidden sm:inline">PLAYERS</span><span className="sm:hidden">PLAY</span>
                         </TabsTrigger>
-                        <TabsTrigger value="roles" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-2 text-xs">
-                            <Database className="w-3 h-3 mr-2" /> ROLES
+                        <TabsTrigger value="roles" className="justify-start whitespace-nowrap data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 md:border-l-4 border-l-0 border-b-2 md:border-b-0 border-transparent border-primary font-mono py-2 text-xs">
+                            <Database className="w-3 h-3 mr-1 md:mr-2" /> ROLES
                         </TabsTrigger>
-                        <TabsTrigger value="contests" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-2 text-xs">
-                            <Database className="w-3 h-3 mr-2" /> CONTESTS
+                        <TabsTrigger value="contests" className="justify-start whitespace-nowrap data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 md:border-l-4 border-l-0 border-b-2 md:border-b-0 border-transparent border-primary font-mono py-2 text-xs">
+                            <Database className="w-3 h-3 mr-1 md:mr-2" /> <span className="hidden sm:inline">CONTESTS</span><span className="sm:hidden">CONT</span>
                         </TabsTrigger>
-                        <TabsTrigger value="settings" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-2 text-xs">
-                            <Settings className="w-3 h-3 mr-2" /> CONFIG
+                        <TabsTrigger value="settings" className="justify-start whitespace-nowrap data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 md:border-l-4 border-l-0 border-b-2 md:border-b-0 border-transparent border-primary font-mono py-2 text-xs">
+                            <Settings className="w-3 h-3 mr-1 md:mr-2" /> CONFIG
                         </TabsTrigger>
                     </TabsList>
                 </div>
@@ -1012,7 +1012,7 @@ export default function AdminDashboard() {
                         </div>
 
                         {/* Compact Grid Layout */}
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                             {/* Left Column - Stats */}
                             <div className="space-y-3">
                                 <div className="grid grid-cols-2 gap-2">
