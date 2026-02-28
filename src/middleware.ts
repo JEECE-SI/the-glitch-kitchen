@@ -14,7 +14,8 @@ export function middleware(request: NextRequest) {
 
     // Player routes
     if (path.startsWith('/player/')) {
-        const idInPath = path.split('/player/')[1];
+        const pathAfterPlayer = path.split('/player/')[1];
+        const idInPath = pathAfterPlayer?.split('/')[0]; // Extract only the brigade_id, ignore nested routes
         const brigadeCookie = request.cookies.get('brigade_auth')?.value;
 
         if (!brigadeCookie || brigadeCookie !== idInPath) {
@@ -24,7 +25,8 @@ export function middleware(request: NextRequest) {
 
     // Staff routes
     if (path.startsWith('/staff/')) {
-        const idInPath = path.split('/staff/')[1];
+        const pathAfterStaff = path.split('/staff/')[1];
+        const idInPath = pathAfterStaff?.split('/')[0]; // Extract only the staff_id, ignore nested routes
         const staffCookie = request.cookies.get('staff_auth')?.value;
 
         if (!staffCookie || staffCookie !== idInPath) {

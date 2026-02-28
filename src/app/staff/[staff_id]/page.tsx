@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Shield, Play, Pause, Timer, Users, Activity, ChevronsRight, AlertTriangle, Trophy, CheckCircle2, PlusCircle } from "lucide-react";
+import { Shield, Play, Pause, Timer, Users, Activity, ChevronsRight, AlertTriangle, Trophy, CheckCircle2, PlusCircle, Database } from "lucide-react";
 
 type GamePhase = 'setup' | 'annonce' | 'contests' | 'temps_libre' | 'finished';
 
@@ -657,6 +657,11 @@ export default function StaffDashboard() {
                     <p className="text-muted-foreground font-mono text-xs md:text-sm mt-1">ID: {game.id.split('-')[0]}... | C: {currentCycle}/4</p>
                 </div>
                 <div className="flex gap-2 md:gap-4 w-full md:w-auto">
+                    <Button variant="outline" className="font-mono text-xs flex-1 md:flex-none border-blue-500/30 hover:bg-blue-500/10 text-blue-400" onClick={() => router.push(`/staff/${staffId}/game-data`)}>
+                        <Database className="w-4 h-4 mr-1 md:mr-2" />
+                        <span className="hidden sm:inline">GAME DATA</span>
+                        <span className="sm:hidden">DATA</span>
+                    </Button>
                     <Button variant="destructive" className="font-mono text-xs flex-1 md:flex-none shadow-[0_0_15px_-3px_rgba(239,68,68,0.4)]" onClick={handleResetInstance}>
                         <AlertTriangle className="w-4 h-4 mr-1 md:mr-2" />
                         <span className="hidden sm:inline">RESET INSTANCE</span>

@@ -965,9 +965,16 @@ export default function AdminDashboard() {
                         <p className="text-muted-foreground font-mono text-xs">Global Configuration & Provisioning</p>
                     </div>
                 </div>
-                <Button variant="outline" className="font-mono text-xs h-8" onClick={() => router.push("/")}>
-                    EXIT_ADMIN
-                </Button>
+                <div className="flex gap-2">
+                    <Button variant="outline" className="font-mono text-xs h-8 border-blue-500/30 hover:bg-blue-500/10 text-blue-400" onClick={() => router.push("/admin/game-data")}>
+                        <Database className="w-3 h-3 mr-1" />
+                        <span className="hidden sm:inline">GAME DATA</span>
+                        <span className="sm:hidden">DATA</span>
+                    </Button>
+                    <Button variant="outline" className="font-mono text-xs h-8" onClick={() => router.push("/")}>
+                        EXIT_ADMIN
+                    </Button>
+                </div>
             </header>
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col md:flex-row gap-4">
