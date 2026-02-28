@@ -984,7 +984,7 @@ export default function PlayerDashboard() {
                                                                     <div className="space-y-2">
                                                                         <Label className="text-white font-mono text-[10px] uppercase">Ingrédient(s)</Label>
                                                                         <Input
-                                                                            placeholder="ex: Farine + beurre..."
+                                                                            placeholder="ex: Sucre, œufs..."
                                                                             className="bg-background/50 border-white/10 font-sans text-xs text-white h-8"
                                                                             value={step.ingredient}
                                                                             onChange={(e) => updateRecipeStep(index, "ingredient", e.target.value)}
@@ -993,7 +993,7 @@ export default function PlayerDashboard() {
                                                                     <div className="space-y-2">
                                                                         <Label className="text-white font-mono text-[10px] uppercase">Technique</Label>
                                                                         <Input
-                                                                            placeholder="ex: Sabler délicatement..."
+                                                                            placeholder="ex: Mélanger délicatement..."
                                                                             className="bg-background/50 border-white/10 font-sans text-xs text-white h-8"
                                                                             value={step.technique}
                                                                             onChange={(e) => updateRecipeStep(index, "technique", e.target.value)}
@@ -1002,7 +1002,7 @@ export default function PlayerDashboard() {
                                                                     <div className="space-y-2">
                                                                         <Label className="text-white font-mono text-[10px] uppercase">Outil(s)</Label>
                                                                         <Input
-                                                                            placeholder="ex: Corne..."
+                                                                            placeholder="ex: Fouet, spatule..."
                                                                             className="bg-background/50 border-white/10 font-sans text-xs text-white h-8"
                                                                             value={step.tool}
                                                                             onChange={(e) => updateRecipeStep(index, "tool", e.target.value)}
