@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import { FileText, Database, Shield, Terminal, Activity, ListOrdered, Users, FlaskConical, Loader2, XCircle, Trophy } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
+import { getCatalogCycle } from "@/lib/cycleRotation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -366,6 +367,9 @@ export default function PlayerDashboard() {
         if (annonceTriggeredRef.current === cycleNum) return; // already triggered for this cycle
         annonceTriggeredRef.current = cycleNum;
 
+        // Cycle catalogue affiché pour cette session (rotation par nom: Session 1→1.x, Session 2→2.x, etc.)
+        const catalogCycle = getCatalogCycle(cycleNum, gameId, gameState?.name);
+
         // --- Seeded random utilities ---
         const seededRng = (seed: string) => {
             let h = 0;
@@ -387,9 +391,9 @@ export default function PlayerDashboard() {
             return a;
         };
 
-        // Get the 3 contests for this cycle (e.g. "1.1", "1.2", "1.3")
+        // Get the 3 contests for this cycle from catalog (rotated per session)
         const cycleContests = catalogContests
-            .filter(c => c.title.match(new RegExp(`^${cycleNum}\\.`)))
+            .filter(c => c.title.match(new RegExp(`^${catalogCycle}\\.`)))
             .sort((a, b) => a.title.localeCompare(b.title))
             .slice(0, 3);
 

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { getCatalogCycle } from "@/lib/cycleRotation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -355,9 +356,11 @@ export default function StaffDashboard() {
 
     useEffect(() => {
         const fetchContests = async () => {
+            if (!gameId) return;
+            const catalogCycle = getCatalogCycle(currentCycle, gameId, game?.name);
             const { data } = await supabase.from('catalog_fragments')
                 .select('*')
-                .like('contest', `${currentCycle}.%`);
+                .like('contest', `${catalogCycle}.%`);
             if (data) {
                 const grouped = data.reduce((acc: any, f: any) => {
                     const cName = f.contest;
@@ -371,7 +374,7 @@ export default function StaffDashboard() {
             }
         };
         fetchContests();
-    }, [currentCycle]);
+    }, [currentCycle, gameId, game?.name]);
 
     const handleValidateContest = async (contestName: string) => {
         const assignments = contestAssignments[contestName];
@@ -794,8 +797,9 @@ export default function StaffDashboard() {
                                         </CardHeader>
                                         <CardContent className="p-4 space-y-3">
                                             {(() => {
+            const catalogCycle = gameId ? getCatalogCycle(currentCycle, gameId, game?.name) : currentCycle;
                                                 const cycleItems = catalogContests
-                                                    .filter(c => c.title.match(new RegExp(`^${currentCycle}\.`)))
+                                                    .filter(c => c.title.match(new RegExp(`^${catalogCycle}\.`)))
                                                     .sort((a, b) => a.title.localeCompare(b.title))
                                                     .slice(0, 3);
 
