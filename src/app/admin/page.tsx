@@ -15,7 +15,7 @@ import * as XLSX from "xlsx";
 
 export default function AdminDashboard() {
     const router = useRouter();
-    const [activeTab, setActiveTab] = useState("games");
+    const [activeTab, setActiveTab] = useState("dashboard");
 
     const [games, setGames] = useState<any[]>([]);
     const [brigades, setBrigades] = useState<any[]>([]);
@@ -70,6 +70,8 @@ export default function AdminDashboard() {
     const [brigadeSearchTerm, setBrigadeSearchTerm] = useState("");
     const [brigadeGameFilter, setBrigadeGameFilter] = useState("");
 
+    const [activeConnections, setActiveConnections] = useState<any[]>([]);
+
     useEffect(() => {
         fetchGames();
         fetchBrigades();
@@ -78,6 +80,7 @@ export default function AdminDashboard() {
         fetchCatalogRoles();
         fetchCatalogContests();
         fetchLeaderboard();
+        fetchActiveConnections();
 
         // Optional realtime updates
         const gamesSubscription = supabase
@@ -90,9 +93,18 @@ export default function AdminDashboard() {
             .on('postgres_changes', { event: '*', schema: 'public', table: 'recipe_tests' }, fetchLeaderboard)
             .subscribe();
 
+        const playersSubscription = supabase
+            .channel('public:players')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => {
+                fetchPlayers();
+                fetchActiveConnections();
+            })
+            .subscribe();
+
         return () => {
             supabase.removeChannel(gamesSubscription);
             supabase.removeChannel(leaderboardSubscription);
+            supabase.removeChannel(playersSubscription);
         };
     }, []);
 
@@ -153,6 +165,35 @@ export default function AdminDashboard() {
             .order('global_score', { ascending: false })
             .limit(50);
         if (data) setLeaderboard(data);
+    };
+
+    const fetchActiveConnections = async () => {
+        // Get all brigades with their player count and game info
+        const { data: brigadesData } = await supabase
+            .from('brigades')
+            .select('id, name, code, game_id, prestige_points');
+        
+        if (!brigadesData) return;
+
+        const connections = await Promise.all(
+            brigadesData.map(async (brigade) => {
+                const { count } = await supabase
+                    .from('players')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('brigade_id', brigade.id);
+                
+                const game = games.find(g => g.id === brigade.game_id);
+                
+                return {
+                    ...brigade,
+                    playerCount: count || 0,
+                    gameName: game?.name || 'Unknown',
+                    gameStatus: game?.status || 'unknown'
+                };
+            })
+        );
+
+        setActiveConnections(connections.filter(c => c.playerCount > 0));
     };
 
     const deleteCatalogItem = async (table: string, id: string, fetchFn: () => void) => {
@@ -913,48 +954,239 @@ export default function AdminDashboard() {
     };
 
     return (
-        <div className="min-h-screen flex flex-col p-4 md:p-8 bg-background">
-            <header className="flex items-center justify-between pb-8 border-b border-white/10 mb-8">
-                <div>
-                    <h1 className="text-3xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-primary to-white flex items-center gap-3 font-mono">
-                        <Server className="w-8 h-8 text-primary" />
-                        SYSADMIN_PANEL
-                    </h1>
-                    <p className="text-muted-foreground font-mono text-sm mt-1">Global Configuration & Provisioning</p>
+        <div className="min-h-screen flex flex-col p-3 md:p-6 bg-background">
+            <header className="flex items-center justify-between pb-3 border-b border-white/10 mb-4">
+                <div className="flex items-center gap-3">
+                    <Server className="w-6 h-6 text-primary" />
+                    <div>
+                        <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary to-white font-mono">
+                            SYSADMIN_PANEL
+                        </h1>
+                        <p className="text-muted-foreground font-mono text-xs">Global Configuration & Provisioning</p>
+                    </div>
                 </div>
-                <Button variant="outline" className="font-mono text-xs" onClick={() => router.push("/")}>
+                <Button variant="outline" className="font-mono text-xs h-8" onClick={() => router.push("/")}>
                     EXIT_ADMIN
                 </Button>
             </header>
 
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col md:flex-row gap-8">
-                <div className="w-full md:w-64 shrink-0">
-                    <TabsList className="flex flex-col h-auto bg-transparent items-stretch space-y-2">
-                        <TabsTrigger value="games" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
-                            <Database className="w-4 h-4 mr-3" /> GAMES_INSTANCES
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col md:flex-row gap-4">
+                <div className="w-full md:w-48 shrink-0">
+                    <TabsList className="flex flex-col h-auto bg-transparent items-stretch space-y-1">
+                        <TabsTrigger value="dashboard" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-2 text-xs">
+                            <Database className="w-3 h-3 mr-2" /> DASHBOARD
                         </TabsTrigger>
-                        <TabsTrigger value="brigades" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
-                            <Users className="w-4 h-4 mr-3" /> BRIGADES_MGMT
+                        <TabsTrigger value="games" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-2 text-xs">
+                            <Database className="w-3 h-3 mr-2" /> GAMES
                         </TabsTrigger>
-                        <TabsTrigger value="players" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
-                            <Users className="w-4 h-4 mr-3" /> PLAYERS_MGMT
+                        <TabsTrigger value="brigades" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-2 text-xs">
+                            <Users className="w-3 h-3 mr-2" /> BRIGADES
                         </TabsTrigger>
-                        <TabsTrigger value="roles" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
-                            <Database className="w-4 h-4 mr-3" /> CATALOG_ROLES
+                        <TabsTrigger value="players" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-2 text-xs">
+                            <Users className="w-3 h-3 mr-2" /> PLAYERS
                         </TabsTrigger>
-                        <TabsTrigger value="contests" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
-                            <Database className="w-4 h-4 mr-3" /> CATALOG_CONTESTS
+                        <TabsTrigger value="roles" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-2 text-xs">
+                            <Database className="w-3 h-3 mr-2" /> ROLES
                         </TabsTrigger>
-                        <TabsTrigger value="leaderboard" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
-                            <Database className="w-4 h-4 mr-3" /> LEADERBOARD
+                        <TabsTrigger value="contests" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-2 text-xs">
+                            <Database className="w-3 h-3 mr-2" /> CONTESTS
                         </TabsTrigger>
-                        <TabsTrigger value="settings" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-3">
-                            <Settings className="w-4 h-4 mr-3" /> GLOBAL_CONFIG
+                        <TabsTrigger value="settings" className="justify-start data-[state=active]:bg-primary/20 data-[state=active]:border-l-4 border-l-4 border-transparent border-primary font-mono py-2 text-xs">
+                            <Settings className="w-3 h-3 mr-2" /> CONFIG
                         </TabsTrigger>
                     </TabsList>
                 </div>
 
                 <div className="flex-1">
+                    {/* DASHBOARD TAB */}
+                    <TabsContent value="dashboard" className="mt-0">
+                        <div className="flex justify-between items-center mb-3">
+                            <h2 className="text-lg font-bold font-mono text-white">Dashboard</h2>
+                            <Button variant="outline" size="sm" className="font-mono text-xs h-7" onClick={() => {
+                                fetchActiveConnections();
+                                fetchLeaderboard();
+                                fetchGames();
+                            }}>
+                                🔄
+                            </Button>
+                        </div>
+
+                        {/* Compact Grid Layout */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                            {/* Left Column - Stats */}
+                            <div className="space-y-3">
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div className="glass-panel border-white/10 bg-background/50 p-3">
+                                        <div className="text-xs font-mono text-muted-foreground mb-1">GAMES</div>
+                                        <div className="text-2xl font-bold font-mono">{games.length}</div>
+                                        <div className="text-xs text-muted-foreground">{games.filter(g => g.status === 'active').length} active</div>
+                                    </div>
+
+                                    <div className="glass-panel border-white/10 bg-background/50 p-3">
+                                        <div className="text-xs font-mono text-muted-foreground mb-1">BRIGADES</div>
+                                        <div className="text-2xl font-bold font-mono">{brigades.length}</div>
+                                        <div className="text-xs text-muted-foreground">{activeConnections.length} active</div>
+                                    </div>
+
+                                    <div className="glass-panel border-white/10 bg-background/50 p-3">
+                                        <div className="text-xs font-mono text-muted-foreground mb-1">PLAYERS</div>
+                                        <div className="text-2xl font-bold font-mono">{players.length}</div>
+                                        <div className="text-xs text-muted-foreground">Total</div>
+                                    </div>
+
+                                    <div className="glass-panel border-white/10 bg-background/50 p-3">
+                                        <div className="text-xs font-mono text-muted-foreground mb-1">TESTS</div>
+                                        <div className="text-2xl font-bold font-mono">{leaderboard.length}</div>
+                                        <div className="text-xs text-muted-foreground">Submissions</div>
+                                    </div>
+                                </div>
+
+                                {/* Active Connections */}
+                                <div className="glass-panel border-white/10 bg-background/50">
+                                    <div className="p-3 border-b border-white/10">
+                                        <div className="font-mono text-sm font-bold text-primary">Active Connections</div>
+                                        <div className="text-xs text-muted-foreground">Brigades avec joueurs</div>
+                                    </div>
+                                    <div className="max-h-[300px] overflow-y-auto">
+                                        <div className="p-2 space-y-1">
+                                            {activeConnections.map((conn) => (
+                                                <div key={conn.id} className="flex items-center justify-between p-2 rounded hover:bg-white/5 border border-white/5">
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="font-bold text-sm truncate">{conn.name}</div>
+                                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                            <span className="font-mono">{conn.code}</span>
+                                                            <span>•</span>
+                                                            <span className="truncate">{conn.gameName}</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 ml-2">
+                                                        <span className={`px-1.5 py-0.5 rounded text-xs font-mono ${
+                                                            conn.gameStatus === 'active' ? 'bg-green-500/20 text-green-500' : 
+                                                            conn.gameStatus === 'setup' ? 'bg-secondary/20 text-secondary' : 
+                                                            'bg-muted text-muted-foreground'
+                                                        }`}>
+                                                            {conn.gameStatus}
+                                                        </span>
+                                                        <span className="font-mono font-bold text-sm">{conn.playerCount}p</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {activeConnections.length === 0 && (
+                                                <div className="text-center py-8 text-muted-foreground text-xs font-mono">
+                                                    NO ACTIVE CONNECTIONS
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Middle Column - Game Progress */}
+                            <div className="glass-panel border-white/10 bg-background/50">
+                                <div className="p-3 border-b border-white/10">
+                                    <div className="font-mono text-sm font-bold text-primary">Game Progress</div>
+                                    <div className="text-xs text-muted-foreground">Cycle status</div>
+                                </div>
+                                <div className="max-h-[500px] overflow-y-auto">
+                                    <div className="p-2 space-y-1">
+                                        {games.map((game) => {
+                                            const gameBrigades = brigades.filter(b => b.game_id === game.id);
+                                            let activeContest = 'None';
+                                            try {
+                                                if (game.active_contest) {
+                                                    const parsed = JSON.parse(game.active_contest);
+                                                    if (parsed.contestAssignments) {
+                                                        const contests = Object.values(parsed.contestAssignments);
+                                                        if (contests.length > 0) {
+                                                            activeContest = contests[0] as string;
+                                                        }
+                                                    }
+                                                }
+                                            } catch (e) {
+                                                activeContest = 'None';
+                                            }
+                                            
+                                            return (
+                                                <div key={game.id} className="p-2 rounded hover:bg-white/5 border border-white/5">
+                                                    <div className="flex items-start justify-between mb-1">
+                                                        <div className="font-bold text-sm">{game.name}</div>
+                                                        <span className={`px-1.5 py-0.5 rounded text-xs font-mono ${
+                                                            game.status === 'setup' ? 'bg-secondary/20 text-secondary' : 
+                                                            game.status === 'active' ? 'bg-green-500/20 text-green-500' : 
+                                                            'bg-muted text-muted-foreground'
+                                                        }`}>
+                                                            {game.status}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-xs text-muted-foreground space-y-0.5">
+                                                        <div>{gameBrigades.length} brigades</div>
+                                                        <div className="truncate">Contest: {activeContest}</div>
+                                                        <div>{new Date(game.created_at).toLocaleDateString('fr-FR')}</div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                        {games.length === 0 && (
+                                            <div className="text-center py-8 text-muted-foreground text-xs font-mono">
+                                                NO GAMES FOUND
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Right Column - Leaderboard */}
+                            <div className="glass-panel border-white/10 bg-background/50">
+                                <div className="p-3 border-b border-white/10">
+                                    <div className="font-mono text-sm font-bold text-primary">Global Leaderboard</div>
+                                    <div className="text-xs text-muted-foreground">Top 10 scores</div>
+                                </div>
+                                <div className="max-h-[500px] overflow-y-auto">
+                                    <div className="p-2 space-y-1">
+                                        {leaderboard.slice(0, 10).map((entry, index) => {
+                                            const brigade = entry.brigades;
+                                            const game = brigade?.games;
+                                            return (
+                                                <div key={entry.id} className="flex items-center gap-2 p-2 rounded hover:bg-white/5 border border-white/5">
+                                                    <div className="w-8 text-center font-mono font-bold">
+                                                        {index === 0 && <span className="text-yellow-500">🥇</span>}
+                                                        {index === 1 && <span className="text-gray-400">🥈</span>}
+                                                        {index === 2 && <span className="text-orange-600">🥉</span>}
+                                                        {index > 2 && <span className="text-muted-foreground text-xs">#{index + 1}</span>}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="font-bold text-sm truncate">{brigade?.name || 'Unknown'}</div>
+                                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                            <span className="font-mono">{brigade?.code || 'N/A'}</span>
+                                                            <span>•</span>
+                                                            <span className="truncate">{game?.name || 'Unknown'}</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <div className={`font-mono font-bold text-lg ${
+                                                            entry.global_score >= 90 ? 'text-green-500' :
+                                                            entry.global_score >= 70 ? 'text-yellow-500' :
+                                                            entry.global_score >= 50 ? 'text-orange-500' :
+                                                            'text-red-500'
+                                                        }`}>
+                                                            {entry.global_score}
+                                                        </div>
+                                                        <div className="text-xs text-muted-foreground">/100</div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                        {leaderboard.length === 0 && (
+                                            <div className="text-center py-8 text-muted-foreground text-xs font-mono">
+                                                NO SCORES YET
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </TabsContent>
+
                     {/* GAMES TAB */}
                     <TabsContent value="games" className="mt-0 space-y-6">
                         <div className="flex justify-between items-center bg-background z-10 sticky top-0 py-2">
@@ -1774,81 +2006,6 @@ export default function AdminDashboard() {
                                                 </TableCell>
                                             </TableRow>
                                         ))}
-                                    </TableBody>
-                                </Table>
-                            </CardContent>
-                        </Card>
-                    </TabsContent>
-
-                    {/* LEADERBOARD TAB */}
-                    <TabsContent value="leaderboard" className="mt-0 space-y-6">
-                        <div className="flex justify-between items-center bg-background z-10 sticky top-0 py-2">
-                            <div>
-                                <h2 className="text-2xl font-bold font-mono text-white">Global Leaderboard</h2>
-                                <p className="text-muted-foreground text-sm">Classement en direct des meilleurs scores de toutes les brigades.</p>
-                            </div>
-                            <Button variant="outline" className="font-mono text-xs" onClick={fetchLeaderboard}>
-                                🔄 REFRESH
-                            </Button>
-                        </div>
-
-                        <Card className="glass-panel border-white/10 bg-background/50">
-                            <CardContent className="p-0">
-                                <Table>
-                                    <TableHeader className="bg-white/5">
-                                        <TableRow className="border-white/10 hover:bg-transparent">
-                                            <TableHead className="font-mono text-primary w-20">RANK</TableHead>
-                                            <TableHead className="font-mono text-primary">BRIGADE</TableHead>
-                                            <TableHead className="font-mono text-primary">CODE</TableHead>
-                                            <TableHead className="font-mono text-primary">GAME</TableHead>
-                                            <TableHead className="font-mono text-primary text-right">SCORE</TableHead>
-                                            <TableHead className="font-mono text-primary">DATE</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {leaderboard.map((entry, index) => {
-                                            const brigade = entry.brigades;
-                                            const game = brigade?.games;
-                                            return (
-                                                <TableRow key={entry.id} className="border-white/10 hover:bg-white/5">
-                                                    <TableCell className="font-mono font-bold text-lg">
-                                                        {index === 0 && <span className="text-yellow-500">🥇</span>}
-                                                        {index === 1 && <span className="text-gray-400">🥈</span>}
-                                                        {index === 2 && <span className="text-orange-600">🥉</span>}
-                                                        {index > 2 && <span className="text-muted-foreground">#{index + 1}</span>}
-                                                    </TableCell>
-                                                    <TableCell className="font-bold">{brigade?.name || 'Unknown'}</TableCell>
-                                                    <TableCell className="font-mono text-secondary">{brigade?.code || 'N/A'}</TableCell>
-                                                    <TableCell className="font-mono text-xs text-muted-foreground">{game?.name || 'Unknown Game'}</TableCell>
-                                                    <TableCell className="text-right">
-                                                        <span className={`font-mono font-bold text-lg ${
-                                                            entry.global_score >= 90 ? 'text-green-500' :
-                                                            entry.global_score >= 70 ? 'text-yellow-500' :
-                                                            entry.global_score >= 50 ? 'text-orange-500' :
-                                                            'text-red-500'
-                                                        }`}>
-                                                            {entry.global_score}
-                                                        </span>
-                                                        <span className="text-muted-foreground text-sm">/100</span>
-                                                    </TableCell>
-                                                    <TableCell className="font-mono text-xs text-muted-foreground">
-                                                        {new Date(entry.created_at).toLocaleString('fr-FR', { 
-                                                            day: '2-digit', 
-                                                            month: '2-digit', 
-                                                            hour: '2-digit', 
-                                                            minute: '2-digit' 
-                                                        })}
-                                                    </TableCell>
-                                                </TableRow>
-                                            );
-                                        })}
-                                        {leaderboard.length === 0 && (
-                                            <TableRow>
-                                                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground font-mono">
-                                                    NO SCORES YET
-                                                </TableCell>
-                                            </TableRow>
-                                        )}
                                     </TableBody>
                                 </Table>
                             </CardContent>
