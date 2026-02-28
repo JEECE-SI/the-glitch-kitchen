@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Database, Plus, Settings, Users, Server, Trash2, Settings2, PlaySquare, Square, AlertTriangle, Edit, ArrowLeftRight } from "lucide-react";
+import { Database, Plus, Settings, Users, Server, Trash2, Settings2, PlaySquare, Square, AlertTriangle, Edit, ArrowLeftRight, PlusCircle } from "lucide-react";
 import * as XLSX from "xlsx";
 
 export default function AdminDashboard() {
@@ -823,6 +823,27 @@ export default function AdminDashboard() {
         }
     };
 
+    const addAttemptToBrigade = async (brigadeId: string, brigadeName: string) => {
+        if (!confirm(`Ajouter une tentative supplémentaire à ${brigadeName} ?`)) return;
+        try {
+            const res = await fetch('/api/add-attempt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ brigadeId })
+            });
+            const data = await res.json();
+            if (data.success) {
+                alert(data.message);
+                fetchBrigades();
+            } else {
+                alert('Erreur : ' + (data.error || 'Unknown error'));
+            }
+        } catch (error: any) {
+            console.error(error);
+            alert('Erreur lors de l\'ajout de tentative : ' + error.message);
+        }
+    };
+
     const deleteAllPlayers = async () => {
         if (!confirm("Attention, cela supprimera TOUS les joueurs. Continuer ?")) return;
         try {
@@ -1290,6 +1311,7 @@ export default function AdminDashboard() {
                                             <TableHead className="font-mono text-primary">NAME</TableHead>
                                             <TableHead className="font-mono text-primary">CODE</TableHead>
                                             <TableHead className="font-mono text-primary">PRESTIGE</TableHead>
+                                            <TableHead className="font-mono text-primary">TENTATIVES</TableHead>
                                             <TableHead className="text-right font-mono text-primary">ACTIONS</TableHead>
                                         </TableRow>
                                     </TableHeader>
@@ -1314,7 +1336,9 @@ export default function AdminDashboard() {
                                                     <TableCell className="font-bold">{b.name}</TableCell>
                                                     <TableCell className="font-mono text-secondary">{b.code}</TableCell>
                                                     <TableCell className="font-mono">{b.prestige_points}</TableCell>
-                                                    <TableCell className="text-right">
+                                                    <TableCell className="font-mono text-xs">{b.max_attempts || 3}</TableCell>
+                                                    <TableCell className="text-right space-x-1">
+                                                        <Button variant="ghost" size="icon" title="Ajouter une tentative" onClick={() => addAttemptToBrigade(b.id, b.name)} className="h-8 w-8 hover:text-green-500"><PlusCircle className="w-4 h-4" /></Button>
                                                         <Button variant="ghost" size="icon" title="Modifier" onClick={() => openEditBrigade(b)} className="h-8 w-8 hover:text-primary"><Edit className="w-4 h-4" /></Button>
                                                     </TableCell>
                                                 </TableRow>
@@ -1322,7 +1346,7 @@ export default function AdminDashboard() {
                                         })}
                                         {brigades.length === 0 && (
                                             <TableRow>
-                                                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground font-mono">NO BRIGADES FOUND</TableCell>
+                                                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground font-mono">NO BRIGADES FOUND</TableCell>
                                             </TableRow>
                                         )}
                                     </TableBody>

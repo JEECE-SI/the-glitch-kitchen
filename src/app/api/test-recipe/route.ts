@@ -110,6 +110,17 @@ async function processRecipeTest(brigadeDbId: string, recipeSteps: any[], openro
     try {
         const supabase = getSupabaseClient();
 
+        // --- Fetch brigade max_attempts ---
+        const { data: brigade, error: brigadeError } = await supabase
+            .from("brigades")
+            .select("max_attempts")
+            .eq("id", brigadeDbId)
+            .single();
+
+        if (brigadeError) console.error("Error fetching brigade:", brigadeError);
+
+        const maxAttempts = brigade?.max_attempts || 3;
+
         // --- Max attempts check ---
         const { data: existingTests, error: testsFetchError } = await supabase
             .from("recipe_tests")
@@ -121,8 +132,8 @@ async function processRecipeTest(brigadeDbId: string, recipeSteps: any[], openro
         if (testsFetchError) console.error("Error fetching existing tests:", testsFetchError);
 
         const attemptCount = existingTests && existingTests.length > 0 ? existingTests[0].attempt_number : 0;
-        if (attemptCount >= 3) {
-            return NextResponse.json({ error: "Nombre maximum d'essais atteint (3/3)." }, { status: 403 });
+        if (attemptCount >= maxAttempts) {
+            return NextResponse.json({ error: `Nombre maximum d'essais atteint (${maxAttempts}/${maxAttempts}).` }, { status: 403 });
         }
 
         // --- Fetch reference recipe ---
@@ -385,7 +396,8 @@ FORMAT DE SORTIE: Répondez UNIQUEMENT avec un objet JSON valide, aucun autre te
         return NextResponse.json({
             ...result,
             attempt_number: attemptNumber,
-            attempts_remaining: 3 - attemptNumber,
+            attempts_remaining: maxAttempts - attemptNumber,
+            max_attempts: maxAttempts,
         });
 
     } catch (error: any) {

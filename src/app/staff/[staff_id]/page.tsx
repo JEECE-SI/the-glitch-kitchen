@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Shield, Play, Pause, Timer, Users, Activity, ChevronsRight, AlertTriangle, Trophy, CheckCircle2 } from "lucide-react";
+import { Shield, Play, Pause, Timer, Users, Activity, ChevronsRight, AlertTriangle, Trophy, CheckCircle2, PlusCircle } from "lucide-react";
 
 type GamePhase = 'setup' | 'annonce' | 'contests' | 'temps_libre' | 'finished';
 
@@ -63,6 +63,27 @@ export default function StaffDashboard() {
         const { data } = await supabase.from('brigades').select('*').eq('game_id', gId).order('name');
         if (data) setBrigades(data);
     }
+
+    const addAttemptToBrigade = async (brigadeId: string, brigadeName: string) => {
+        if (!confirm(`Ajouter une tentative supplémentaire à ${brigadeName} ?`)) return;
+        try {
+            const res = await fetch('/api/add-attempt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ brigadeId })
+            });
+            const data = await res.json();
+            if (data.success) {
+                alert(data.message);
+                if (gameId) fetchBrigades(gameId);
+            } else {
+                alert('Erreur : ' + (data.error || 'Unknown error'));
+            }
+        } catch (error: any) {
+            console.error(error);
+            alert('Erreur lors de l\'ajout de tentative : ' + error.message);
+        }
+    };
 
     async function fetchRoles() {
         const { data } = await supabase.from('catalog_roles').select('*');
@@ -646,9 +667,11 @@ export default function StaffDashboard() {
             </header>
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col w-full max-w-7xl mx-auto">
-                <TabsList className="grid w-full grid-cols-2 bg-white/5 border border-white/10 p-1 mb-6 rounded-xl">
-                    <TabsTrigger value="control" className="font-mono text-xs md:text-sm data-[state=active]:bg-blue-500/20 glass-panel">GAME_DIRECTOR</TabsTrigger>
-                    <TabsTrigger value="players" className="font-mono text-xs md:text-sm data-[state=active]:bg-purple-500/20 glass-panel">PLAYER_MANAGEMENT</TabsTrigger>
+                <TabsList className="grid w-full grid-cols-4 bg-white/5 border border-white/10">
+                    <TabsTrigger value="control" className="data-[state=active]:bg-primary/20 font-mono">GAME_CONTROL</TabsTrigger>
+                    <TabsTrigger value="rankings" className="data-[state=active]:bg-primary/20 font-mono">RANKINGS</TabsTrigger>
+                    <TabsTrigger value="players" className="data-[state=active]:bg-primary/20 font-mono">PLAYERS</TabsTrigger>
+                    <TabsTrigger value="brigades" className="data-[state=active]:bg-primary/20 font-mono">BRIGADES</TabsTrigger>
                 </TabsList>
 
                 {/* GAME CONTROL TAB */}
@@ -990,6 +1013,60 @@ export default function StaffDashboard() {
                                         <TableRow>
                                             <TableCell colSpan={4} className="text-center py-12 text-muted-foreground font-mono">
                                                 NO_PLAYERS_REGISTERED_YET
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* Brigades Tab */}
+                <TabsContent value="brigades" className="space-y-6">
+                    <Card className="glass-panel border-white/10 bg-background/50">
+                        <CardHeader className="border-b border-white/10">
+                            <CardTitle className="font-mono text-xl flex items-center gap-2">
+                                <Users className="w-5 h-5 text-primary" />
+                                BRIGADES_MANAGEMENT
+                            </CardTitle>
+                            <CardDescription className="font-mono text-xs">Gérer les tentatives de test des brigades</CardDescription>
+                        </CardHeader>
+                        <CardContent className="p-0">
+                            <Table>
+                                <TableHeader className="bg-white/5">
+                                    <TableRow className="border-white/10 hover:bg-transparent">
+                                        <TableHead className="font-mono text-primary">BRIGADE</TableHead>
+                                        <TableHead className="font-mono text-primary">CODE</TableHead>
+                                        <TableHead className="font-mono text-primary">PRESTIGE</TableHead>
+                                        <TableHead className="font-mono text-primary">TENTATIVES</TableHead>
+                                        <TableHead className="text-right font-mono text-primary">ACTIONS</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {brigades.map((b) => (
+                                        <TableRow key={b.id} className="border-white/10 hover:bg-white/5">
+                                            <TableCell className="font-bold">{b.name}</TableCell>
+                                            <TableCell className="font-mono text-secondary">{b.code}</TableCell>
+                                            <TableCell className="font-mono">{b.prestige_points}</TableCell>
+                                            <TableCell className="font-mono text-xs">{b.max_attempts || 3}</TableCell>
+                                            <TableCell className="text-right">
+                                                <Button 
+                                                    variant="ghost" 
+                                                    size="icon" 
+                                                    title="Ajouter une tentative" 
+                                                    onClick={() => addAttemptToBrigade(b.id, b.name)} 
+                                                    className="h-8 w-8 hover:text-green-500"
+                                                >
+                                                    <PlusCircle className="w-4 h-4" />
+                                                </Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                    {brigades.length === 0 && (
+                                        <TableRow>
+                                            <TableCell colSpan={5} className="text-center py-8 text-muted-foreground font-mono">
+                                                NO BRIGADES FOUND
                                             </TableCell>
                                         </TableRow>
                                     )}
